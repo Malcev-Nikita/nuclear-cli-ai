@@ -8,8 +8,9 @@
 Цепочка: команда → regex-роутер → (если не распознано) LLM через Ollama с узкими
 инструментами → MCP-сервер Nuclear → плеер.
 
-Текущий этап — **1: текстовые команды в консоли** (`assistant.py`, собран и
-оттестирован против фейков 2026-07-31; живой прогон у пользователя — следующий шаг).
+Этап 1 (`assistant.py`, текстовые команды) **работает вживую у пользователя**
+(подтверждено 2026-08-01). Текущий этап — **2: голос** (`voice.py`, собран
+2026-08-01, ждёт живого прогона; TTS ещё не делали).
 
 Связанный проект: `/home/claude/projects/nuclear-plugin-puer` — плагин для Nuclear
 (`puer-ytmusic` metadata / `puer-import` playlists / `puer-youtube` streaming).
@@ -29,7 +30,8 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 
 ```bash
 # у пользователя (Windows):
-pip install -r requirements.txt && python assistant.py
+python -m pip install -r requirements.txt && python assistant.py   # этап 1, текст
+python -m pip install -r requirements-voice.txt && python voice.py # этап 2, голос
 
 # в песочнице (python нет, есть uv):
 uv run --python 3.12 --with requests python assistant.py
@@ -50,6 +52,14 @@ uv run --python 3.12 --with requests python assistant.py
   агент сам ретраит без параметра (старые Ollama).
 - «Включи X» **заменяет** очередь (clearQueue → addToQueue → goToIndex(0) → play),
   как у Яндекс станции.
+- **Wake word без openWakeWord** (`voice.py`): под русское имя «Игорь» готовой
+  модели нет, тренировать свою — отдельный проект. Вместо этого whisper
+  распознаёт каждую фразу (энергетический VAD режет речь на фразы), а ассистент
+  реагирует только если в первых 3 словах есть имя из `ASSISTANT_NAMES`
+  (нечётко, Левенштейн ≤1 — ловит «Егорь»/«Игор», побочно и падежи «Игоря»).
+  Имя без команды → бип + окно 8 сек, когда команда принимается без имени.
+  Известная цена: whisper молотит всё подряд, включая музыку из колонок —
+  на ПК с GPU ок, для Pi решение пересмотрим (см. этап 3).
 - Плейлисты: сначала локальные Nuclear (Playlists.getIndex, вхождение имени),
   потом поиск YT Music → `Metadata.fetchAlbumDetails` (принимает id плейлистов VL…/PL…).
 
@@ -88,10 +98,14 @@ uv run --python 3.12 --with requests python assistant.py
 
 ## План
 
-- Этап 1 ✅ собран; ждёт живого прогона у пользователя (риски: формулировки для
-  qwen3, достаточность clearQueue→…→play в настоящем Nuclear, шкала громкости).
-- Этап 2: голос — STT `faster-whisper`, TTS `piper` (русские голоса, создан для Pi),
-  wake word `openWakeWord`.
-- Этап 3: демон с wake word; вариант Pi-сателлита.
+- Этап 1 ✅ работает вживую (2026-08-01).
+- Этап 2: голос. STT ✅ собран (`voice.py`: sounddevice → энергетический VAD →
+  faster-whisper → wake-имя → agent.handle). Ждёт живого прогона; риски:
+  wheels ctranslate2/sounddevice под Python 3.14 (если pip не соберёт —
+  ставить через `py -3.12`), ложные срабатывания VAD на музыке из колонок,
+  качество распознавания на `small`. Дальше в этапе 2 — TTS `piper`.
+- Этап 3: демон с автозапуском; вариант Pi-сателлита. Для Pi текущий
+  wake-подход (whisper на всё подряд) дорог — вернуться к openWakeWord
+  (тренировка кастомного имени) или whisper tiny только как детектор имени.
 - Push-событий смены трека в MCP нет; если понадобятся — SSE `/api/events`
   HTTP API Nuclear (`integrations.jam`).

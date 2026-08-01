@@ -1,10 +1,12 @@
 # Nuclear CLI AI
 
 Голосовой ассистент для [Nuclear](https://github.com/nukeop/nuclear) — аналог
-«Яндекс станции» на своём ПК. Текущий этап: **1 — текстовые команды в консоли**.
+«Яндекс станции» на своём ПК. Текущий этап: **2 — голосовые команды**
+(этап 1, текстовый, работает: `assistant.py`).
 
 ```
-команда → regex-роутер (мгновенно) → LLM (Ollama, tool calling) → Nuclear MCP → плеер
+голос → VAD → faster-whisper (STT) → «фраза начинается с "Игорь"?»
+     → regex-роутер (мгновенно) → LLM (Ollama, tool calling) → Nuclear MCP → плеер
 ```
 
 ## Требования
@@ -18,9 +20,17 @@
 
 ```powershell
 cd nuclear-cli-ai
-pip install -r requirements.txt
-python assistant.py
+python -m pip install -r requirements.txt
+python assistant.py                # этап 1: текстовые команды
+
+python -m pip install -r requirements-voice.txt
+python voice.py                    # этап 2: голос (микрофон + wake-имя)
+python voice.py --devices          # список микрофонов (выбор — env MIC_DEVICE)
 ```
+
+Голосовой режим: скажите **«Игорь, включи нирвану»** — фразы без имени
+игнорируются. Просто «Игорь!» — бип, и следующие 8 секунд команда принимается
+без имени. Первый запуск скачивает модель whisper (~500 МБ для `small`).
 
 Примеры команд:
 
@@ -40,6 +50,10 @@ python assistant.py
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | можно указать другой хост (напр. с Raspberry Pi на ПК) |
 | `OLLAMA_MODEL` | `qwen3:4b` | на Pi: `qwen3:1.7b` или `qwen3:0.6b` |
 | `OLLAMA_KEEP_ALIVE` | `30m` | сколько держать модель в памяти |
+| `ASSISTANT_NAMES` | `игорь` | имена через запятую: `игорь,гарик,ассистент` |
+| `WHISPER_MODEL` | `small` | `medium`/`large-v3-turbo` — точнее, но тяжелее |
+| `WHISPER_DEVICE` | `auto` | `cuda` / `cpu` (auto пробует cuda, падает на cpu) |
+| `MIC_DEVICE` | системный | индекс или часть имени из `voice.py --devices` |
 
 ```powershell
 $env:OLLAMA_MODEL = "qwen3:1.7b"; python assistant.py
@@ -56,9 +70,13 @@ $env:OLLAMA_MODEL = "qwen3:1.7b"; python assistant.py
   без второго круга через модель.
 - `think: false` для qwen3 — рассуждения дают +2-5 секунд латентности.
 - Шкала громкости Nuclear не задокументирована — определяется по текущему значению.
+- **Wake word без отдельной модели**: у openWakeWord нет готовой модели под
+  русское имя. Вместо неё whisper распознаёт каждую фразу, а ассистент реагирует
+  только на фразы, начинающиеся с имени (нечёткое сравнение: «Егорь»/«Игор»
+  тоже срабатывают; побочно срабатывают и падежи — «Игоря»).
 
 ## Дальше по плану
 
-- Этап 2: голос — `faster-whisper` (STT), `piper` (TTS, русские голоса), `openWakeWord`.
-- Этап 3: демон с wake word; вариант переноса на Raspberry Pi
+- Этап 2 (продолжение): TTS `piper` (русские голоса) — озвучка ответов.
+- Этап 3: демон/автозапуск; вариант переноса на Raspberry Pi
   (лёгкая модель `qwen3:1.7b`/`0.6b` или Pi как сателлит с LLM на ПК).

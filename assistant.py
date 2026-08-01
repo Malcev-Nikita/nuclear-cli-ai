@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 
 import requests
@@ -153,6 +154,7 @@ class McpClient:
 class Nuclear:
     def __init__(self, mcp: McpClient):
         self.mcp = mcp
+        self._volume_is_unit: bool | None = None  # шкала громкости: True = 0-1, False = 0-100
 
     # -- поиск (идёт в активный metadata-провайдер, т.е. в плагин puer-ytmusic)
 
@@ -292,13 +294,18 @@ class Nuclear:
 
     def change_volume(self, delta: int) -> str:
         current = self.mcp.call("Playback.getVolume") or 0
-        current_pct = current * 100 if isinstance(current, (int, float)) and current <= 1 else current
+        if isinstance(current, (int, float)):
+            self._volume_is_unit = current <= 1
+        current_pct = current * 100 if self._volume_is_unit else current
         return self.set_volume(int(round(current_pct)) + delta)
 
     def _to_volume_scale(self, level_pct: int) -> float | int:
-        """Шкала громкости Nuclear не задокументирована: подстраиваемся под текущее значение."""
-        current = self.mcp.call("Playback.getVolume")
-        if isinstance(current, (int, float)) and current <= 1:
+        """Шкала громкости Nuclear не задокументирована: подстраиваемся под текущее
+        значение. Определяем один раз и кешируем — дальше без лишнего запроса."""
+        if self._volume_is_unit is None:
+            current = self.mcp.call("Playback.getVolume")
+            self._volume_is_unit = isinstance(current, (int, float)) and current <= 1
+        if self._volume_is_unit:
             return round(level_pct / 100, 2)
         return level_pct
 
@@ -336,6 +343,15 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
         (r"^(включи |поставь |запусти )?(избранн\w+|любим\w+)( треки| музыку| песни)?$",
          lambda m: player.play_favorites()),
         (r"^(?:включи |поставь |запусти )?все (?:песни|треки) (.+)$",
+         lambda m: player.play_artist(m.group(1))),
+        # Явно названный тип — детерминированно, без LLM (экономит секунды на команду).
+        (r"^(?:включи |поставь |запусти )?альбом\s+(.+)$",
+         lambda m: player.play_album(m.group(1))),
+        (r"^(?:включи |поставь |запусти )?плейлист\s+(.+)$",
+         lambda m: player.play_playlist(m.group(1))),
+        (r"^(?:включи |поставь |запусти )(?:трек|песню)\s+(.+)$",
+         lambda m: player.play_track(m.group(1))),
+        (r"^(?:включи |поставь |запусти )(?:группу|исполнителя|артиста)\s+(.+)$",
          lambda m: player.play_artist(m.group(1))),
         (r"^(перемешай|шафл|shuffle)$", lambda m: player.set_shuffle(True)),
         (r"^(по порядку|без шафла)$", lambda m: player.set_shuffle(False)),
@@ -409,6 +425,21 @@ class Agent:
             "set_volume": lambda a: player.set_volume(int(a["level"])),
         }
         self._think_supported = True
+        self._http = requests.Session()
+
+    def warmup_async(self) -> None:
+        """Грузим модель в память Ollama в фоне, чтобы первая LLM-команда не платила
+        холодный старт (несколько секунд). Пустой messages — штатный способ load."""
+        def _load():
+            try:
+                self._http.post(
+                    f"{OLLAMA_URL}/api/chat",
+                    json={"model": OLLAMA_MODEL, "messages": [], "keep_alive": OLLAMA_KEEP_ALIVE},
+                    timeout=HTTP_TIMEOUT,
+                )
+            except requests.RequestException:
+                pass  # недоступность Ollama всплывёт с нормальной ошибкой на первой команде
+        threading.Thread(target=_load, daemon=True).start()
 
     def handle(self, text: str) -> str:
         text = text.strip()
@@ -434,7 +465,7 @@ class Agent:
         }
         if self._think_supported:
             body["think"] = False  # для qwen3: рассуждения дают +секунды латентности
-        resp = requests.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=HTTP_TIMEOUT)
+        resp = self._http.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=HTTP_TIMEOUT)
         if resp.status_code == 400 and self._think_supported and "think" in resp.text.lower():
             self._think_supported = False
             return self._ollama_chat(text)
@@ -528,6 +559,7 @@ def main() -> None:
 
     print("Nuclear CLI AI — этап 1 (текстовые команды)")
     check_connections(mcp)
+    agent.warmup_async()  # модель грузится, пока пользователь печатает первую команду
     print("Примеры: «включи нирвану», «поставь smells like teen spirit», «плейлист rock»,")
     print("         «дальше», «пауза», «громче», «что играет», «в избранное». Выход: q\n")
 

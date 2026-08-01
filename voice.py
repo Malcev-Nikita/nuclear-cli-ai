@@ -294,6 +294,7 @@ def main() -> None:
 
     print("Nuclear CLI AI — этап 2 (голос)")
     assistant.check_connections(mcp)
+    agent.warmup_async()  # Ollama грузит модель параллельно с загрузкой whisper
 
     print(f"… загружаю whisper «{WHISPER_MODEL}»", flush=True)
     started = time.monotonic()

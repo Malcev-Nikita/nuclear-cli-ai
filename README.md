@@ -13,7 +13,7 @@
 
 - Nuclear с включённым MCP (`Settings → Integrations → Enable MCP Server`)
   и плагином puer (metadata-провайдер выбран в Sources);
-- [Ollama](https://ollama.com/download) + модель: `ollama pull qwen3:4b`;
+- [Ollama](https://ollama.com/download) + модель: `ollama pull qwen3:1.7b`;
 - Python 3.10+.
 
 ## Запуск (Windows, PowerShell)
@@ -38,8 +38,9 @@ python voice.py --devices          # список микрофонов (выбо
 | --- | --- |
 | `включи нирвану` | LLM → `play_artist` → топ-треки исполнителя в очередь |
 | `поставь smells like teen spirit` | LLM → `play_track` → первый найденный трек |
-| `включи альбом nevermind` | LLM → `play_album` → альбом целиком |
-| `плейлист rock classics` | LLM → `play_playlist` → сначала свои плейлисты, потом YT Music |
+| `включи альбом nevermind` | без LLM (тип назван явно) → альбом целиком |
+| `плейлист rock classics` | без LLM → сначала свои плейлисты, потом YT Music |
+| `поставь песню Х` / `включи группу Х` | без LLM → трек / исполнитель |
 | `включи избранное` / `любимые треки` | без LLM → все избранные треки в очередь |
 | `дальше`, `пауза`, `громче`, `что играет`, `в избранное` | без LLM, мгновенно |
 
@@ -49,7 +50,7 @@ python voice.py --devices          # список микрофонов (выбо
 | --- | --- | --- |
 | `NUCLEAR_MCP_URL` | `http://127.0.0.1:8800/mcp` | адрес из Settings → Integrations |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | можно указать другой хост (напр. с Raspberry Pi на ПК) |
-| `OLLAMA_MODEL` | `qwen3:4b` | на Pi: `qwen3:1.7b` или `qwen3:0.6b` |
+| `OLLAMA_MODEL` | `qwen3:1.7b` | побольше: `qwen3:4b`; на Pi: `qwen3:0.6b` |
 | `OLLAMA_KEEP_ALIVE` | `30m` | сколько держать модель в памяти |
 | `ASSISTANT_NAMES` | `игорь` | имена через запятую: `игорь,гарик,ассистент` |
 | `WHISPER_MODEL` | `large-v3-turbo` | на слабой машине: `small` (хуже имена артистов) |
@@ -62,8 +63,11 @@ $env:OLLAMA_MODEL = "qwen3:1.7b"; python assistant.py
 
 ## Архитектура и решения
 
-- **Роутер до LLM**: частые команды (пауза/дальше/громче/лайк) обрабатываются
+- **Роутер до LLM**: частые команды (пауза/дальше/громче/лайк) и команды с явно
+  названным типом («альбом Х», «плейлист Х», «песню Х», «группу Х») обрабатываются
   regex'ами без модели — ноль латентности; на Raspberry Pi это большинство команд.
+- **Прогрев Ollama при старте**: модель грузится в память в фоне, первая команда
+  не платит холодный старт.
 - **Узкие инструменты вместо сырого MCP**: модель выбирает из 12 понятных действий
   (`play_track`, `play_artist`, ...), а не исследует API Nuclear через
   `list_methods`/`describe_type` (это экономит 3-4 раунда на команду).

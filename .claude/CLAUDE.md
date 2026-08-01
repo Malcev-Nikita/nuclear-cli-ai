@@ -104,7 +104,13 @@ assistant.py и voice.py импортируют оттуда — новые на
   для пользователя слать `[System.Text.Encoding]::UTF8.GetBytes(...)`.
 - **qwen3:1.7b может выдать tool call текстом** (`{"name": ...}` в content вместо
   tool_calls) — в `_handle_with_llm` есть фолбэк `_parse_text_tool_call`.
-  Подтверждено вживую 2026-08-01 на «включи избранное».
+  Подтверждено вживую 2026-08-01 на «включи избранное». Ещё два вырожденных
+  ответа (тоже вживую): голое имя инструмента текстом («play_track») и эхо
+  команды («включи куплиново») — чинит `_degenerate_fallback` (имя инструмента →
+  вызов с текстом команды без глагола; эхо → play_track).
+- **Музыка не нашлась → обычный YouTube**: `play_track`/`play_artist` при пустом
+  поиске YT Music зовут `_youtube_fallback` → `play_youtube`. Так «включи
+  Куплинова» (ютубер, в YT Music нет) играет звук его видео.
 - **`Favorites.getTracks` возвращает обёртки, не треки** (стоило двух крэшей
   Nuclear 2026-08-01): `FavoriteEntry<Track>[] = [{ref: Track, addedAtIso}]` —
   подтверждено исходниками (plugin-sdk/src/types/favorites.ts). В

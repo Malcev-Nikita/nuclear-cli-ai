@@ -179,15 +179,22 @@ class Nuclear:
     def play_track(self, query: str) -> str:
         tracks = self._search(query, "tracks", 5)
         if not tracks:
-            return f"Ничего не нашёл по запросу «{query}»"
+            return self._youtube_fallback(query)
         self.replace_queue_and_play(tracks[:1])
         top = tracks[0]
         return f"Включаю: {_fmt_track(top)}"
 
+    def _youtube_fallback(self, query: str) -> str:
+        """В YT Music не нашлось (ютуберы, подкасты) — пробуем обычный YouTube."""
+        try:
+            return self.play_youtube(query)
+        except requests.RequestException:
+            return f"Ничего не нашёл по запросу «{query}»"
+
     def play_artist(self, name: str) -> str:
         artists = self._search(name, "artists", 1)
         if not artists:
-            return f"Исполнитель «{name}» не нашёлся"
+            return self._youtube_fallback(name)
         artist = artists[0]
         artist_id = artist["source"]["id"]
         tracks = self.mcp.call("Metadata.fetchArtistTopTracks", {"artistId": artist_id}) or []
@@ -780,6 +787,30 @@ class Agent:
                 return fn(match)
         return self._handle_with_llm(text)
 
+    # Инструменты, которым достаточно строки запроса / не нужны аргументы вовсе —
+    # для починки вырожденных ответов qwen3:1.7b.
+    _QUERY_TOOLS = {"play_track", "play_artist", "play_album", "play_playlist",
+                    "play_youtube", "web_search"}
+    _NO_ARG_TOOLS = {"pause", "resume", "next_track", "previous_track",
+                     "favorite_current", "play_favorites", "now_playing",
+                     "get_time", "get_date"}
+
+    def _degenerate_fallback(self, content: str, text: str) -> str | None:
+        """qwen3:1.7b вместо вызова инструмента иногда отвечает голым именем
+        инструмента («play_track») или эхом самой команды. Чиним оба случая."""
+        tool_name = content.strip().strip('«»"`.,! ').lower()
+        subject = re.sub(r"^(?:включ\w+|поставь|запусти|сыграй)\s+", "",
+                         text.strip(), flags=re.IGNORECASE)
+        if tool_name in self._NO_ARG_TOOLS:
+            return self.tool_impl[tool_name]({})
+        if tool_name in self._QUERY_TOOLS and subject:
+            return self.tool_impl[tool_name]({"query": subject, "name": subject})
+        # Эхо команды вместо ответа: «включи X» -> сами играем X.
+        norm = lambda s: re.sub(r"[^\wё ]", "", s.lower()).strip()
+        if norm(content) == norm(text) and subject != text.strip():
+            return self.player.play_track(subject)
+        return None
+
     def answer_from_web(self, query: str) -> str:
         """Поиск в интернете + краткий пересказ результатов моделью.
 
@@ -852,6 +883,9 @@ class Agent:
             if text_call:
                 tool_calls = [text_call]
             else:
+                fallback = self._degenerate_fallback(content, text)
+                if fallback is not None:
+                    return fallback
                 return content or "Не понял команду"
 
         results = []

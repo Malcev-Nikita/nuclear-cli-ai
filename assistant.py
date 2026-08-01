@@ -212,9 +212,15 @@ class Nuclear:
 
     def play_playlist(self, name: str) -> str:
         # Сначала свои плейлисты в Nuclear, потом поиск в YouTube Music.
+        # Свои сравниваем через транслитерацию: голосом приходит «жанулька»,
+        # а плейлист называется «Zhanulka» — иначе свой не найдётся, и уедем
+        # в YT Music на чужой одноимённый.
         wanted = name.lower().strip()
         index = self.mcp.call("Playlists.getIndex") or []
-        local = next((p for p in index if wanted in p.get("name", "").lower()), None)
+        local = next(
+            (p for p in index if _playlist_names_match(wanted, p.get("name", ""))),
+            None,
+        )
         if local:
             playlist = self.mcp.call("Playlists.getPlaylist", {"id": local["id"]}) or {}
             tracks = [item["track"] for item in playlist.get("items", []) if item.get("track")]
@@ -484,6 +490,34 @@ def _spoken_temp(value, genitive: bool = False) -> str:
     if degrees < 0:
         return f"минус {abs(degrees)}"
     return "нуля" if genitive else "ноль"
+
+
+_TRANSLIT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "zh",
+    "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
+    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f",
+    "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "", "ы": "y",
+    "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+
+
+def _translit(text: str) -> str:
+    text = text.lower().replace("ё", "е")
+    text = "".join(_TRANSLIT.get(ch, ch) for ch in text)
+    # Нормализация латиницы, чтобы «рок» сошёлся с "Rock": ck -> k, c -> k (кроме ch).
+    text = text.replace("ck", "k")
+    return re.sub(r"c(?!h)", "k", text)
+
+
+def _playlist_names_match(wanted: str, name: str) -> bool:
+    """Нечёткое совпадение имён плейлистов: кириллица ↔ латиница, падежи."""
+    w, n = _translit(wanted), _translit(name.lower().strip())
+    if not w or not n:
+        return False
+    if w in n or n in w:
+        return True
+    # «жанульку» -> «жанульк» ⊂ «zhanulka»: терпимость к падежному окончанию.
+    return len(w) > 3 and w[:-1] in n
 
 
 def _fmt_track(track: dict) -> str:

@@ -318,14 +318,23 @@ class Speaker:
             sd.wait()
             return
 
-        echo_levels: list[float] = []
-        baseline_blocks = int(0.4 * SAMPLE_RATE / BLOCK)  # первые 0.4 с меряем эхо
+        # Сбросить звук, записанный ДО начала речи (тишина, пока думал агент):
+        # иначе эталон эха меряется по тишине, собственный голос из колонок
+        # оказывается «громче эха в 3 раза» — и ассистент перебивает сам себя.
+        mic.flush()
+        skip_blocks = int(0.2 * SAMPLE_RATE / BLOCK)  # задержка до колонок/микрофона
+        baseline_blocks = int(0.4 * SAMPLE_RATE / BLOCK)  # столько меряем своё эхо
         need_loud = max(1, int(0.25 * SAMPLE_RATE / BLOCK))  # ~0.25 с речи поверх
+        echo_levels: list[float] = []
+        seen = 0
         loud_streak = 0
         stream = sd.get_stream()
         while stream.active:
             block = mic.get_block(timeout=0.1)
             if block is None:
+                continue
+            seen += 1
+            if seen <= skip_blocks:
                 continue
             rms = float(np.sqrt(np.mean(block**2)))
             if len(echo_levels) < baseline_blocks:

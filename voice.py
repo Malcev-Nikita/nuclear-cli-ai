@@ -25,6 +25,7 @@ import assistant
 from config import (
     ASSISTANT_NAMES,
     BARE_COMMANDS,
+    BARGE_GAIN,
     BLOCK,
     FOLLOWUP_SEC,
     MAX_UTTER_SEC,
@@ -33,6 +34,7 @@ from config import (
     PIPER_VOICE,
     PRE_ROLL_SEC,
     SAMPLE_RATE,
+    SHUTUP_COMMANDS,
     SILENCE_END_SEC,
     TTS_SPEED,
     VAD_ABS_MIN,
@@ -138,6 +140,13 @@ class MicSegmenter:
                 self._queue.get_nowait()
         except queue.Empty:
             pass
+
+    def get_block(self, timeout: float):
+        """Один блок аудио (для barge-in во время озвучки); None по таймауту."""
+        try:
+            return self._queue.get(timeout=timeout)[:, 0]
+        except queue.Empty:
+            return None
 
     def utterances(self):
         np = self._np
@@ -270,7 +279,10 @@ class Speaker:
         # length_scale — длительность звука: 1/скорость (0.67 при TTS_SPEED=1.5).
         self._config = SynthesisConfig(length_scale=1.0 / TTS_SPEED)
 
-    def say(self, text: str) -> None:
+    def say(self, text: str, mic: MicSegmenter | None = None) -> None:
+        """Озвучить текст. С mic — можно перебить голосом (barge-in): пока играем,
+        следим за микрофоном, и если пользователь заговорил громче эха нашего же
+        голоса из колонок — замолкаем. После — сбрасываем буфер микрофона."""
         import numpy as np
         import sounddevice as sd
 
@@ -283,7 +295,30 @@ class Speaker:
         audio = np.frombuffer(
             b"".join(c.audio_int16_bytes for c in chunks), dtype=np.int16,
         )
-        sd.play(audio, samplerate=chunks[0].sample_rate, blocking=True)
+        sd.play(audio, samplerate=chunks[0].sample_rate)
+        if mic is None or not BARGE_GAIN:
+            sd.wait()
+            return
+
+        echo_levels: list[float] = []
+        baseline_blocks = int(0.4 * SAMPLE_RATE / BLOCK)  # первые 0.4 с меряем эхо
+        need_loud = max(1, int(0.25 * SAMPLE_RATE / BLOCK))  # ~0.25 с речи поверх
+        loud_streak = 0
+        stream = sd.get_stream()
+        while stream.active:
+            block = mic.get_block(timeout=0.1)
+            if block is None:
+                continue
+            rms = float(np.sqrt(np.mean(block**2)))
+            if len(echo_levels) < baseline_blocks:
+                echo_levels.append(rms)
+                continue
+            baseline = max(sum(echo_levels) / len(echo_levels), VAD_ABS_MIN)
+            loud_streak = loud_streak + 1 if rms > baseline * BARGE_GAIN else 0
+            if loud_streak >= need_loud:
+                sd.stop()  # пользователь перебил — замолкаем
+                break
+        mic.flush()
 
 
 def _sanitize_for_tts(text: str) -> str:
@@ -381,16 +416,20 @@ def main() -> None:
                 if time.monotonic() < follow_until:
                     command = normalized
                     follow_until = 0.0
-                elif BARE_COMMANDS.match(normalized):
+                elif BARE_COMMANDS.match(normalized) or SHUTUP_COMMANDS.match(normalized):
                     command = normalized  # управляющая команда — можно без имени
             if command is None:
                 print(f"   · мимо: «{text}»  [stt {stt_ms:.0f}ms]")
                 continue
+            if SHUTUP_COMMANDS.match(command):
+                # «замолчи»/«заткнись» — оборвать речь и молчать (музыку не трогаем).
+                print("   🤫")
+                follow_until = 0.0
+                continue
             if not command:
                 print(f"🎤 {text} — слушаю…")
                 if speaker:
-                    speaker.say("Слушаю")
-                    mic.flush()  # не слушать собственный голос из колонок
+                    speaker.say("Слушаю", mic)
                 else:
                     _beep()
                 follow_until = time.monotonic() + FOLLOWUP_SEC
@@ -408,8 +447,7 @@ def main() -> None:
             if answer:
                 print(f"   {answer}   [{time.monotonic() - t0:.1f}s]")
                 if speaker:
-                    speaker.say(answer)
-                    mic.flush()  # не слушать собственный голос из колонок
+                    speaker.say(answer, mic)  # с barge-in: можно перебить голосом
 
 
 if __name__ == "__main__":

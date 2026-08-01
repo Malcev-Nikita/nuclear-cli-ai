@@ -376,6 +376,17 @@ def _strip_html(text: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", text)).strip()
 
 
+def _strip_think(text: str) -> str:
+    """Вырезать рассуждения qwen3. Даже с think:false модель иногда рассуждает,
+    причём открывающий <think> может отсутствовать — режем и одинокие теги."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    if "</think>" in text:  # рассуждения без открывающего тега — ответ после него
+        text = text.rsplit("</think>", 1)[1]
+    if "<think>" in text:  # открыли и не закрыли — ответа не было
+        text = text.split("<think>", 1)[0]
+    return text.strip()
+
+
 # Расшифровка кодов погоды WMO, которые отдаёт Open-Meteo.
 _WMO_DESC = {
     0: "ясно", 1: "почти ясно", 2: "переменная облачность", 3: "пасмурно",
@@ -496,7 +507,9 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
 
     rules: list[tuple[str, callable]] = [
         (r"^(пауза|стоп музыка|подожди|pause)$", lambda m: player.pause()),
-        (r"^(стоп|стой|остановись|хватит|замолчи|выключи|stop)$", lambda m: player.stop()),
+        # «замолчи»/«заткнись» тут нет намеренно — они затыкают озвучку (voice.py),
+        # а не музыку.
+        (r"^(стоп|стой|остановись|хватит|выключи|stop)$", lambda m: player.stop()),
         (r"^(играй|продолжи|продолжай|воспроизведи|play|плей)$", lambda m: player.resume()),
         # «Включи музыку» без уточнений = продолжить то, что в очереди.
         (r"^(?:включ\w+|поставь|играй|запусти)\s+музыку$", lambda m: player.resume()),
@@ -662,11 +675,12 @@ class Agent:
                 {"role": "system", "content":
                     "Ответь на вопрос пользователя по результатам поиска: кратко, "
                     "1-3 предложения, по-русски, без ссылок и лишних слов — ответ "
-                    "будет озвучен голосом."},
-                {"role": "user", "content": f"Вопрос: {query}\n\nРезультаты поиска:\n{context}"},
+                    "будет озвучен голосом. Отвечай сразу, без рассуждений."},
+                # /no_think — переключатель qwen3, глушит режим рассуждений.
+                {"role": "user",
+                 "content": f"Вопрос: {query}\n\nРезультаты поиска:\n{context} /no_think"},
             ])
-            content = (reply.get("message", {}).get("content") or "").strip()
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            content = _strip_think(reply.get("message", {}).get("content") or "")
             if content:
                 return content
         except requests.RequestException:
@@ -709,8 +723,7 @@ class Agent:
         tool_calls = message.get("tool_calls") or []
 
         if not tool_calls:
-            content = (message.get("content") or "").strip()
-            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            content = _strip_think(message.get("content") or "")
             # qwen3:1.7b иногда пишет tool call текстом вместо настоящего вызова.
             text_call = _parse_text_tool_call(content)
             if text_call:

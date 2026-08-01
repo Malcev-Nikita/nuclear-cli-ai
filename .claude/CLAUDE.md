@@ -78,6 +78,12 @@ uv run --python 3.12 --with requests python assistant.py
   по текущему значению `Playback.getVolume`.
 - PowerShell `Invoke-WebRequest` кодирует строковое тело НЕ в UTF-8 — в примерах
   для пользователя слать `[System.Text.Encoding]::UTF8.GetBytes(...)`.
+- **faster-whisper на GPU (Windows)**: `WhisperModel(device="cuda")` создаётся
+  успешно, а падает только первый encode — «Library cublas64_12.dll is not
+  found». Лечение: pip-пакеты `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (уже в
+  requirements-voice.txt) + `os.add_dll_directory` на их bin (есть в voice.py,
+  `_add_cuda_dll_dirs`). Поэтому же в Transcriber есть warm-up при старте —
+  чтобы фолбэк на cpu срабатывал сразу, а не на первой фразе.
 
 ## Тестовый стенд (без Nuclear и Ollama)
 

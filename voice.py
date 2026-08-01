@@ -171,22 +171,55 @@ class MicSegmenter:
 
 # --- STT --------------------------------------------------------------------
 
+def _add_cuda_dll_dirs() -> None:
+    """ctranslate2 на Windows не находит cublas/cudnn сам.
+
+    Если стоят pip-пакеты nvidia-cublas-cu12 / nvidia-cudnn-cu12, их bin-папки
+    (site-packages/nvidia/*/bin) надо добавить в поиск DLL руками.
+    """
+    if sys.platform != "win32":
+        return
+    import site
+    from pathlib import Path
+
+    roots = list(site.getsitepackages()) + [site.getusersitepackages()]
+    for root in roots:
+        for bin_dir in Path(root).glob("nvidia/*/bin"):
+            try:
+                os.add_dll_directory(str(bin_dir))
+                os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+            except OSError:
+                pass
+
+
 class Transcriber:
     def __init__(self):
         from faster_whisper import WhisperModel
 
-        device = WHISPER_DEVICE
-        compute = "float16" if device == "cuda" else "int8"
-        if device == "auto":
+        if WHISPER_DEVICE in ("auto", "cuda"):
+            _add_cuda_dll_dirs()
             try:
-                self.model = WhisperModel(WHISPER_MODEL, device="cuda", compute_type="float16")
-                self.device = "cuda"
+                model = WhisperModel(WHISPER_MODEL, device="cuda", compute_type="float16")
+                self._warmup(model)  # CUDA-DLL могут отвалиться только на первом encode
+                self.model, self.device = model, "cuda"
                 return
-            except Exception:
-                device = "cpu"
-                compute = "int8"
-        self.model = WhisperModel(WHISPER_MODEL, device=device, compute_type=compute)
-        self.device = device
+            except Exception as error:
+                if WHISPER_DEVICE == "cuda":
+                    raise
+                reason = str(error).splitlines()[0]
+                print(f"   (cuda не завёлся: {reason} — работаю на cpu; для gpu:")
+                print("    python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12)")
+        self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        self._warmup(self.model)
+        self.device = "cpu"
+
+    @staticmethod
+    def _warmup(model) -> None:
+        import numpy as np
+
+        segments, _ = model.transcribe(np.zeros(SAMPLE_RATE // 2, dtype="float32"),
+                                       language="ru", beam_size=1)
+        list(segments)
 
     def transcribe(self, audio) -> str:
         segments, _ = self.model.transcribe(
@@ -214,10 +247,18 @@ def _beep():
 
 def _resolve_mic():
     if not MIC_DEVICE:
-        return None
+        return None  # None = системный микрофон по умолчанию (Windows/Linux)
     if MIC_DEVICE.isdigit():
         return int(MIC_DEVICE)
     return MIC_DEVICE  # sounddevice сам матчит подстроку имени
+
+
+def _mic_name(device) -> str:
+    import sounddevice as sd
+
+    if device is None:
+        return f"{sd.query_devices(kind='input')['name']} (системный по умолчанию)"
+    return sd.query_devices(device, kind="input")["name"]
 
 
 def list_devices() -> None:
@@ -251,10 +292,12 @@ def main() -> None:
     stt = Transcriber()
     print(f"✔ Whisper {WHISPER_MODEL} на {stt.device} за {time.monotonic() - started:.1f}s")
     names = ", ".join(n.capitalize() for n in ASSISTANT_NAMES)
-    print(f"Слушаю микрофон. Имя: {names}. Скажи «{ASSISTANT_NAMES[0].capitalize()}, включи …». Ctrl+C — выход.\n")
+    mic_device = _resolve_mic()
+    print(f"🎙 Микрофон: {_mic_name(mic_device)}")
+    print(f"Имя: {names}. Скажи «{ASSISTANT_NAMES[0].capitalize()}, включи …». Ctrl+C — выход.\n")
 
     follow_until = 0.0
-    with MicSegmenter(_resolve_mic()) as mic:
+    with MicSegmenter(mic_device) as mic:
         for audio in mic.utterances():
             t0 = time.monotonic()
             text = stt.transcribe(audio)

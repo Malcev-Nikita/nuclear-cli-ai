@@ -85,6 +85,13 @@ uv run --python 3.12 --with requests python assistant.py
   пробует `Favorites.getTracks`, при ошибке discovery через мета-инструмент
   `list_methods` (фильтр Favorites.*track*). Какой метод реально сработал у
   пользователя — ещё не подтверждено; когда подтвердится, захардкодить.
+- **Два формата треков** (стоило крэша Nuclear 2026-08-01): поиск отдаёт
+  `artists`/`title`, внутреннее хранилище (избранное) — `artist`/`name`.
+  `Queue.addToQueue` переваривает только поисковый формат; сырой трек из
+  избранного роняет рендерер Nuclear, а так как очередь персистится, Nuclear
+  перестаёт стартовать (лечение: убить процесс, вычистить queue-ключи из
+  `%APPDATA%\nuclear\config.json`). Перед addToQueue всё прогонять через
+  `_as_search_track`.
 - **faster-whisper на GPU (Windows)**: `WhisperModel(device="cuda")` создаётся
   успешно, а падает только первый encode — «Library cublas64_12.dll is not
   found». Лечение: pip-пакеты `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (уже в

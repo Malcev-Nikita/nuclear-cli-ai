@@ -273,7 +273,9 @@ class Nuclear:
             tracks = tracks.get("tracks", [])
         if not tracks:
             return "В избранном пока пусто"
-        self.replace_queue_and_play(tracks)
+        # Избранное хранится во внутреннем формате (artist/name), а очередь ждёт
+        # формат поиска (artists/title); сырой трек из избранного роняет UI Nuclear.
+        self.replace_queue_and_play([_as_search_track(t) for t in tracks])
         return f"Включаю избранное: {len(tracks)} треков"
 
     def _favorites_tracks(self) -> list | dict:
@@ -337,6 +339,19 @@ class Nuclear:
         if isinstance(current, (int, float)) and current <= 1:
             return round(level_pct / 100, 2)
         return level_pct
+
+
+def _as_search_track(track: dict) -> dict:
+    """Внутренний формат Nuclear (artist/name) -> формат поиска (artists/title)."""
+    out = dict(track)
+    if not out.get("artists"):
+        artist = out.get("artist")
+        if isinstance(artist, dict):
+            artist = artist.get("name")
+        out["artists"] = [{"name": artist}] if artist else []
+    if not out.get("title"):
+        out["title"] = out.get("name") or "?"
+    return out
 
 
 def _fmt_track(track: dict) -> str:

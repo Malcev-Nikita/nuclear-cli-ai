@@ -154,7 +154,7 @@ PIPER_VOICE = os.environ.get("PIPER_VOICE", "ru_RU-irina-medium")
 
 # Темп речи: 1.0 — как в оригинале голоса, 1.25 — на четверть быстрее,
 # 1.5 — заметно быстрее. Меньше 1.0 — медленнее.
-TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.25"))
+TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.5"))
 
 # Папка, куда скачиваются модели голосов. Менять незачем.
 VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")

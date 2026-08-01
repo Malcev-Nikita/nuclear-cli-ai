@@ -1,7 +1,7 @@
 """Все настройки Nuclear CLI AI в одном месте.
 
 Почти каждую можно переопределить переменной окружения с тем же именем,
-не трогая этот файл: $env:OLLAMA_MODEL = "qwen3:4b"; python voice.py
+не трогая этот файл: $env:OLLAMA_MODEL = "qwen3:1.7b"; python voice.py
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 # Какая языковая модель разбирает команды, которые не поймал быстрый роутер
 # («включи что-нибудь весёлое»). Крупнее модель = понятливее, но медленнее:
 # qwen3:4b — быстрая, изредка тупит;.
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:4b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
 
 # Сколько Ollama держит модель в оперативке после последней команды.
 # Пока держит — ответы быстрые; выгрузилась — следующая команда ждёт

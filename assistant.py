@@ -5,13 +5,12 @@
 с узкими инструментами → MCP-сервер Nuclear → плеер.
 
 Запуск:  python assistant.py
-Конфиг:  переменные окружения NUCLEAR_MCP_URL, OLLAMA_URL, OLLAMA_MODEL.
+Конфиг:  config.py (env-переменные с теми же именами переопределяют).
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import threading
@@ -19,14 +18,14 @@ import time
 
 import requests
 
-NUCLEAR_MCP_URL = os.environ.get("NUCLEAR_MCP_URL", "http://127.0.0.1:8800/mcp")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
-# Держим модель в памяти между командами, иначе каждый запрос платит холодный старт.
-OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
-
-HTTP_TIMEOUT = 90  # поиск идёт через InnerTube/yt-dlp, первые запросы бывают долгими
-WEATHER_CITY = os.environ.get("WEATHER_CITY", "")  # пусто = wttr.in определит по IP
+from config import (
+    HTTP_TIMEOUT,
+    NUCLEAR_MCP_URL,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+    WEATHER_CITY,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -315,45 +314,122 @@ class Nuclear:
 # Интернет-инструменты (не про музыку)
 # ---------------------------------------------------------------------------
 
-def get_weather(city: str = "") -> str:
-    """Погода через wttr.in — без API-ключа; без города определяет его по IP.
+def web_search(query: str, limit: int = 5) -> list[tuple[str, str]]:
+    """Поиск в DuckDuckGo (HTML-версия, без API-ключа) -> [(заголовок, сниппет)]."""
+    resp = requests.post(
+        "https://html.duckduckgo.com/html/",
+        data={"q": query, "kl": "ru-ru"},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
+    snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
+    results = []
+    for i, title in enumerate(titles[:limit]):
+        snippet = snippets[i] if i < len(snippets) else ""
+        results.append((_strip_html(title), _strip_html(snippet)))
+    return results
 
+
+def _strip_html(text: str) -> str:
+    import html
+
+    return html.unescape(re.sub(r"<[^>]+>", "", text)).strip()
+
+
+# Расшифровка кодов погоды WMO, которые отдаёт Open-Meteo.
+_WMO_DESC = {
+    0: "ясно", 1: "почти ясно", 2: "переменная облачность", 3: "пасмурно",
+    45: "туман", 48: "изморозь",
+    51: "лёгкая морось", 53: "морось", 55: "сильная морось",
+    56: "ледяная морось", 57: "сильная ледяная морось",
+    61: "небольшой дождь", 63: "дождь", 65: "сильный дождь",
+    66: "ледяной дождь", 67: "сильный ледяной дождь",
+    71: "небольшой снег", 73: "снег", 75: "сильный снег", 77: "снежная крупа",
+    80: "небольшой ливень", 81: "ливень", 82: "сильный ливень",
+    85: "небольшой снегопад", 86: "снегопад",
+    95: "гроза", 96: "гроза с градом", 99: "сильная гроза с градом",
+}
+
+_geo_cache: dict[str, tuple[float, float, str]] = {}
+
+
+def _geocode(city: str) -> tuple[float, float, str]:
+    """Город -> координаты через геокодер Open-Meteo (кешируется на сессию).
+
+    Whisper отдаёт город в падеже («в казани») — пробуем восстановить
+    именительный простыми заменами окончания.
+    """
+    if city in _geo_cache:
+        return _geo_cache[city]
+    attempts = [city]
+    if city[-1:] in "еиую":
+        stem = city[:-1]
+        attempts += [stem + "а", stem + "ь", stem]
+    for attempt in attempts:
+        resp = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": attempt, "count": 1, "language": "ru"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results") or []
+        if results:
+            found = (results[0]["latitude"], results[0]["longitude"], results[0]["name"])
+            _geo_cache[city] = found
+            return found
+    raise ValueError(f"город «{city}» не нашёлся")
+
+
+def _locate_by_ip() -> tuple[float, float, str]:
+    resp = requests.get("http://ip-api.com/json/?fields=lat,lon,city&lang=ru", timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["lat"], data["lon"], data.get("city", "")
+
+
+def get_weather(city: str = "") -> str:
+    """Погода через Open-Meteo — бесплатно, без API-ключа, отвечает за ~0.3 с.
+
+    Город: из команды -> WEATHER_CITY из конфига -> по IP (ip-api.com).
     Фраза собирается «под озвучку»: температура словами (плюс/минус N).
     """
     city = (city or WEATHER_CITY).strip()
     try:
+        lat, lon, name = _geocode(city) if city else _locate_by_ip()
         resp = requests.get(
-            f"https://wttr.in/{requests.utils.quote(city)}?format=j1&lang=ru",
-            timeout=15,
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat, "longitude": lon,
+                "current": "temperature_2m,apparent_temperature,weather_code",
+                "daily": "temperature_2m_min,temperature_2m_max",
+                "timezone": "auto", "forecast_days": 1,
+            },
+            timeout=10,
         )
         resp.raise_for_status()
         data = resp.json()
-        current = data["current_condition"][0]
+        current = data["current"]
     except (requests.RequestException, ValueError, KeyError, IndexError) as error:
         return f"Не смог узнать погоду: {error}"
 
-    desc = (current.get("lang_ru") or current.get("weatherDesc") or [{}])[0].get("value", "")
-    if not city:
-        try:
-            city = data["nearest_area"][0]["areaName"][0]["value"]
-        except (KeyError, IndexError):
-            pass
-
-    place = f" в {city}" if city else ""
-    phrase = f"Сейчас{place} {_spoken_temp(current['temp_C'])}"
+    place = f"В городе {name} сейчас" if name else "Сейчас"
+    phrase = f"{place} {_spoken_temp(current['temperature_2m'])}"
+    desc = _WMO_DESC.get(current.get("weather_code"))
     if desc:
-        phrase += f", {desc.lower()}"
-    phrase += f", ощущается как {_spoken_temp(current['FeelsLikeC'])}"
-    today = (data.get("weather") or [{}])[0]
-    if today.get("mintempC") and today.get("maxtempC"):
-        low = _spoken_temp(today["mintempC"], genitive=True)
-        high = _spoken_temp(today["maxtempC"], genitive=True)
+        phrase += f", {desc}"
+    phrase += f", ощущается как {_spoken_temp(current['apparent_temperature'])}"
+    daily = data.get("daily") or {}
+    if daily.get("temperature_2m_min") and daily.get("temperature_2m_max"):
+        low = _spoken_temp(daily["temperature_2m_min"][0], genitive=True)
+        high = _spoken_temp(daily["temperature_2m_max"][0], genitive=True)
         phrase += f". Сегодня от {low} до {high}"
     return phrase
 
 
 def _spoken_temp(value, genitive: bool = False) -> str:
-    degrees = int(value)
+    degrees = int(round(float(value)))
     if degrees > 0:
         return f"плюс {degrees}"
     if degrees < 0:
@@ -424,8 +500,9 @@ SYSTEM_PROMPT = (
     "Ты — голосовой помощник музыкального плеера. На каждую команду пользователя "
     "вызови ровно один подходящий инструмент. Названия песен, исполнителей и плейлистов "
     "передавай так, как их произнёс пользователь, не переводя на другой язык. "
-    "На вопрос о погоде вызови get_weather. Если команда не про музыку и не про "
-    "погоду — ответь одной короткой фразой без инструментов."
+    "На вопрос о погоде вызови get_weather. На вопрос о фактах, людях, событиях "
+    "или новостях вызови web_search. Если это просто болтовня — ответь одной "
+    "короткой фразой без инструментов."
 )
 
 def build_llm_tools() -> list[dict]:
@@ -462,6 +539,8 @@ def build_llm_tools() -> list[dict]:
              {"level": {"type": "integer", "description": "0-100"}}, ["level"]),
         tool("get_weather", "Узнать погоду сейчас и на сегодня",
              {"city": {"type": "string", "description": "Город, если назван; иначе пустая строка"}}),
+        tool("web_search", "Найти в интернете ответ на вопрос о фактах, людях, событиях, новостях",
+             {"query": {"type": "string", "description": "Поисковый запрос"}}, ["query"]),
     ]
 
 
@@ -484,9 +563,15 @@ class Agent:
             "now_playing": lambda a: player.now_playing(),
             "set_volume": lambda a: player.set_volume(int(a["level"])),
             "get_weather": lambda a: get_weather(a.get("city") or ""),
+            "web_search": lambda a: self.answer_from_web(a["query"]),
         }
         self._think_supported = True
         self._http = requests.Session()
+        # «Найди/загугли X» — поиск напрямую, без выбора инструмента моделью.
+        self.router.append((
+            re.compile(r"^(?:найди|загугли|погугли|поищи)\s+(.+)$", re.IGNORECASE),
+            lambda m: self.answer_from_web(m.group(1)),
+        ))
 
     def warmup_async(self) -> None:
         """Грузим модель в память Ollama в фоне, чтобы первая LLM-команда не платила
@@ -512,24 +597,62 @@ class Agent:
                 return fn(match)
         return self._handle_with_llm(text)
 
+    def answer_from_web(self, query: str) -> str:
+        """Поиск в интернете + краткий пересказ результатов моделью.
+
+        Единственное место с двумя вызовами LLM на команду: без второго круга
+        пользователю пришлось бы слушать сырые сниппеты поисковика.
+        """
+        try:
+            results = web_search(query)
+        except requests.RequestException as error:
+            return f"Поиск не удался: {error}"
+        if not results:
+            return f"По запросу «{query}» ничего не нашлось"
+        context = "\n".join(f"- {title}. {snippet}" for title, snippet in results)
+        try:
+            reply = self._ollama_raw([
+                {"role": "system", "content":
+                    "Ответь на вопрос пользователя по результатам поиска: кратко, "
+                    "1-3 предложения, по-русски, без ссылок и лишних слов — ответ "
+                    "будет озвучен голосом."},
+                {"role": "user", "content": f"Вопрос: {query}\n\nРезультаты поиска:\n{context}"},
+            ])
+            content = (reply.get("message", {}).get("content") or "").strip()
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            if content:
+                return content
+        except requests.RequestException:
+            pass
+        # LLM недоступна/промолчала — отдаём хотя бы первый сниппет.
+        title, snippet = results[0]
+        return snippet or title
+
     def _ollama_chat(self, text: str) -> dict:
+        return self._ollama_raw(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            tools=self.tools,
+        )
+
+    def _ollama_raw(self, messages: list[dict], tools: list | None = None) -> dict:
         body = {
             "model": OLLAMA_MODEL,
             "stream": False,
             "keep_alive": OLLAMA_KEEP_ALIVE,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ],
-            "tools": self.tools,
+            "messages": messages,
             "options": {"temperature": 0},
         }
+        if tools:
+            body["tools"] = tools
         if self._think_supported:
             body["think"] = False  # для qwen3: рассуждения дают +секунды латентности
         resp = self._http.post(f"{OLLAMA_URL}/api/chat", json=body, timeout=HTTP_TIMEOUT)
         if resp.status_code == 400 and self._think_supported and "think" in resp.text.lower():
             self._think_supported = False
-            return self._ollama_chat(text)
+            return self._ollama_raw(messages, tools)
         resp.raise_for_status()
         return resp.json()
 

@@ -37,8 +37,10 @@ python -m pip install -r requirements-voice.txt && python voice.py # этап 2,
 uv run --python 3.12 --with requests python assistant.py
 ```
 
-Конфиг через env: `NUCLEAR_MCP_URL` (деф. `http://127.0.0.1:8800/mcp`),
-`OLLAMA_URL` (`http://127.0.0.1:11434`), `OLLAMA_MODEL` (`qwen3:1.7b`), `OLLAMA_KEEP_ALIVE` (`30m`).
+Все настройки — в `config.py` (env-переменные с теми же именами переопределяют):
+подключения (NUCLEAR_MCP_URL/OLLAMA_*), имя (`ASSISTANT_NAMES`, сейчас «мага»),
+BARE_COMMANDS, whisper, VAD-пороги, piper (PIPER_VOICE/TTS_SPEED), WEATHER_CITY.
+assistant.py и voice.py импортируют оттуда — новые настройки класть туда же.
 
 ## Архитектурные решения (не менять без причины)
 
@@ -51,7 +53,7 @@ uv run --python 3.12 --with requests python assistant.py
   параллельно с загрузкой whisper.
 - Шкала громкости определяется по `getVolume` один раз и кешируется
   (`Nuclear._volume_is_unit`) — «громче» = 2 MCP-вызова, а не 3.
-- **13 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
+- **14 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
   (`list_methods`/`call`...): иначе модель тратит 3-4 discovery-раунда на команду.
 - **Один вызов LLM на команду**: результат инструмента отдаётся пользователю напрямую,
   без второго круга через модель (латентность).
@@ -149,10 +151,18 @@ uv run --python 3.12 --with requests python assistant.py
   каждой озвучки `mic.flush()` — иначе ассистент слышит сам себя. Темп речи —
   `TTS_SPEED` (деф. 1.5; в piper это `SynthesisConfig(length_scale=1/скорость)`).
   Ждёт живого прогона (риск: wheels piper-tts под Python 3.14 — тогда `py -3.12`).
-- **Погода** (`get_weather` в assistant.py): wttr.in `?format=j1&lang=ru`, без
-  API-ключа; город из команды → `WEATHER_CITY` → по IP (nearest_area). Фраза
-  собирается «под озвучку»: температура словами («плюс 18»). Роутер ловит
-  «какая погода [в X]» / «сколько градусов»; в LLM это инструмент get_weather.
+- **Погода** (`get_weather` в assistant.py): Open-Meteo (быстрее и стабильнее
+  wttr.in, ~0.3 с, без ключа): геокодер open-meteo (кеш на сессию, падежи
+  «в казани» лечатся перебором окончаний) → forecast API, коды WMO → `_WMO_DESC`.
+  Город из команды → `WEATHER_CITY` → по IP (ip-api.com). Фраза «под озвучку»:
+  температура словами («плюс 18»). Яндекс.Погоду не взяли: API по ключу, платно.
+- **Поиск** (`web_search` + `Agent.answer_from_web`): DuckDuckGo HTML-эндпоинт
+  (`html.duckduckgo.com/html/`, kl=ru-ru, без ключа), парсинг regex'ом по
+  `result__a`/`result__snippet` (при смене разметки DDG — чинить тут) → второй
+  вызов LLM пересказывает сниппеты в 1-3 фразы «под озвучку». Это единственное
+  исключение из правила «один вызов LLM на команду». Роутер: «найди/загугли X»;
+  остальные вопросы о фактах — через инструмент web_search (решает модель).
+  Фолбэк без LLM — первый сниппет.
 - Этап 3: демон с автозапуском; вариант Pi-сателлита. Для Pi текущий
   wake-подход (whisper на всё подряд) дорог — вернуться к openWakeWord
   (тренировка кастомного имени) или whisper tiny только как детектор имени.

@@ -10,8 +10,7 @@ Wake word без отдельной модели: whisper и так распоз
 (ASSISTANT_NAMES, через запятую), сравнение нечёткое — «Егорь»/«Игор» тоже ловятся.
 
 Запуск:  python voice.py            (--devices — список микрофонов)
-Конфиг:  env WHISPER_MODEL, WHISPER_DEVICE, WHISPER_BEAM, ASSISTANT_NAMES,
-         MIC_DEVICE + все переменные assistant.py.
+Конфиг:  config.py (env-переменные с теми же именами переопределяют).
 """
 
 from __future__ import annotations
@@ -23,48 +22,31 @@ import sys
 import time
 
 import assistant
-
-# --- конфиг -----------------------------------------------------------------
-
-# large-v3-turbo — лучший русский при ~1.5 ГБ VRAM; small путает сленг и имена
-# артистов (проверено вживую). На слабой машине: WHISPER_MODEL=small.
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
-WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "auto")  # auto | cuda | cpu
-WHISPER_BEAM = int(os.environ.get("WHISPER_BEAM", "5"))  # 1 = жадный (быстрее, но хуже имена)
-# Имена, на которые откликается ассистент (через запятую, регистр не важен).
-ASSISTANT_NAMES = [
-    n.strip().lower().replace("ё", "е")
-    for n in os.environ.get("ASSISTANT_NAMES", "мага").split(",")
-    if n.strip()
-]
-MIC_DEVICE = os.environ.get("MIC_DEVICE")  # индекс или подстрока имени; пусто = дефолтный
-# Голос piper для озвучки ответов; пустая строка = TTS выключен.
-PIPER_VOICE = os.environ.get("PIPER_VOICE", "ru_RU-irina-medium")
-TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.25"))  # 1.0 = обычный темп, больше = быстрее
-VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
-
-SAMPLE_RATE = 16000  # частота, которую ест whisper
-BLOCK = 512  # 32 мс на блок
-PRE_ROLL_SEC = 0.4  # хвост до срабатывания VAD, чтобы не резать первый слог
-SILENCE_END_SEC = 0.9  # столько тишины закрывает фразу; меньше = быстрее реакция
-                       # на команды подряд, но длинные фразы режутся на полуслове
-MAX_UTTER_SEC = 12.0
-MIN_UTTER_SEC = 0.4
-VAD_GAIN = 2.5  # речь = громче адаптивного шумового пола во столько раз
-VAD_ABS_MIN = 0.004  # но не тише этого RMS (защита от «речи» в полной тишине)
-FOLLOWUP_SEC = 4.0  # после «Мага» без команды столько секунд ждём команду без имени
+from config import (
+    ASSISTANT_NAMES,
+    BARE_COMMANDS,
+    BLOCK,
+    FOLLOWUP_SEC,
+    MAX_UTTER_SEC,
+    MIC_DEVICE,
+    MIN_UTTER_SEC,
+    PIPER_VOICE,
+    PRE_ROLL_SEC,
+    SAMPLE_RATE,
+    SILENCE_END_SEC,
+    TTS_SPEED,
+    VAD_ABS_MIN,
+    VAD_GAIN,
+    VOICES_DIR,
+    WHISPER_BEAM,
+    WHISPER_DEVICE,
+    WHISPER_MODEL,
+)
 
 # Типичные галлюцинации whisper на шуме/музыке — не считаем их речью.
 _JUNK = re.compile(
     r"субтитр|dimatorzok|редактор|продолжение следует|спасибо за просмотр",
     re.IGNORECASE,
-)
-
-# Короткие управляющие команды, принимаемые БЕЗ имени. Список узкий намеренно:
-# всё, что здесь есть, может сработать от чужого разговора или телевизора.
-BARE_COMMANDS = re.compile(
-    r"^(стоп|стой|хватит|пауза|подожди|играй|продолжи|продолжай|дальше|"
-    r"следующ\w+|пропусти|скип|назад|предыдущ\w+|громче|погромче|тише|потише)$"
 )
 
 

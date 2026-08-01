@@ -314,6 +314,44 @@ class Nuclear:
 # Интернет-инструменты (не про музыку)
 # ---------------------------------------------------------------------------
 
+_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля",
+               "августа", "сентября", "октября", "ноября", "декабря"]
+_WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница",
+             "суббота", "воскресенье"]
+
+
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return many
+    last = n % 10
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return few
+    return many
+
+
+def get_time() -> str:
+    """Текущее время словами — «Сейчас 14 часов 35 минут» (удобно озвучивать)."""
+    from datetime import datetime
+
+    now = datetime.now()
+    hours = f"{now.hour} {_plural(now.hour, 'час', 'часа', 'часов')}"
+    if now.minute == 0:
+        return f"Сейчас ровно {hours}"
+    minutes = f"{now.minute} {_plural(now.minute, 'минута', 'минуты', 'минут')}"
+    return f"Сейчас {hours} {minutes}"
+
+
+def get_date() -> str:
+    """Сегодняшняя дата и день недели — «Сегодня 1 августа, суббота»."""
+    from datetime import datetime
+
+    now = datetime.now()
+    return f"Сегодня {now.day} {_MONTHS_GEN[now.month - 1]}, {_WEEKDAYS[now.weekday()]}"
+
+
 def web_search(query: str, limit: int = 5) -> list[tuple[str, str]]:
     """Поиск в DuckDuckGo (HTML-версия, без API-ключа) -> [(заголовок, сниппет)]."""
     resp = requests.post(
@@ -483,6 +521,10 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
          lambda m: player.play_track(m.group(1))),
         (r"^(?:включ\w+|поставь|запусти)\s+(?:группу|исполнителя|артиста)\s+(.+)$",
          lambda m: player.play_artist(m.group(1))),
+        (r"^(?:а\s+)?(?:сколько\s+(?:сейчас\s+)?(?:времени|время)|который\s+час)(?:\s+на часах)?\s*\??$",
+         lambda m: get_time()),
+        (r"^(?:а\s+)?(?:какое\s+(?:сегодня\s+)?число|какой\s+(?:сегодня\s+)?день(?:\s+недели)?)\s*\??$",
+         lambda m: get_date()),
         (r"^(?:какая\s+)?(?:сейчас\s+)?погода(?:\s+(?:сейчас|сегодня))?(?:\s+(?:в|на)\s+(.+?))?\s*\??$",
          lambda m: get_weather(m.group(1) or "")),
         (r"^сколько (?:сейчас )?градусов(?: на улице)?\??$", lambda m: get_weather("")),
@@ -500,9 +542,10 @@ SYSTEM_PROMPT = (
     "Ты — голосовой помощник музыкального плеера. На каждую команду пользователя "
     "вызови ровно один подходящий инструмент. Названия песен, исполнителей и плейлистов "
     "передавай так, как их произнёс пользователь, не переводя на другой язык. "
-    "На вопрос о погоде вызови get_weather. На вопрос о фактах, людях, событиях "
-    "или новостях вызови web_search. Если это просто болтовня — ответь одной "
-    "короткой фразой без инструментов."
+    "На вопрос о погоде вызови get_weather, о времени — get_time, о дате — "
+    "get_date. На вопрос о фактах, людях, событиях или новостях вызови "
+    "web_search. Если это просто болтовня — ответь одной короткой фразой "
+    "без инструментов."
 )
 
 def build_llm_tools() -> list[dict]:
@@ -541,6 +584,8 @@ def build_llm_tools() -> list[dict]:
              {"city": {"type": "string", "description": "Город, если назван; иначе пустая строка"}}),
         tool("web_search", "Найти в интернете ответ на вопрос о фактах, людях, событиях, новостях",
              {"query": {"type": "string", "description": "Поисковый запрос"}}, ["query"]),
+        tool("get_time", "Сказать текущее время"),
+        tool("get_date", "Сказать сегодняшнюю дату и день недели"),
     ]
 
 
@@ -564,6 +609,8 @@ class Agent:
             "set_volume": lambda a: player.set_volume(int(a["level"])),
             "get_weather": lambda a: get_weather(a.get("city") or ""),
             "web_search": lambda a: self.answer_from_web(a["query"]),
+            "get_time": lambda a: get_time(),
+            "get_date": lambda a: get_date(),
         }
         self._think_supported = True
         self._http = requests.Session()

@@ -27,6 +27,7 @@ from config import (
     BARE_COMMANDS,
     BARGE_GAIN,
     BLOCK,
+    CONTEXT_COMMAND_MAX_WORDS,
     FOLLOWUP_SEC,
     MAX_UTTER_SEC,
     MIC_DEVICE,
@@ -98,6 +99,23 @@ def extract_command(text: str, names: list[str] = ASSISTANT_NAMES) -> str | None
 
 def looks_like_junk(text: str) -> bool:
     return not re.search(r"[а-яa-z]", text.lower().replace("ё", "е")) or bool(_JUNK.search(text))
+
+
+def control_in_context(words: list[str]) -> str | None:
+    """Управляющая команда первым или последним словом короткой фразы.
+
+    «Он может и управлять этим приложением, продолжай» -> «продолжай»;
+    «Заткнись, сука» -> «заткнись». Длинные фразы не трогаем — там слово
+    вроде «дальше» на конце скорее часть разговора, чем команда.
+    """
+    if not words or not CONTEXT_COMMAND_MAX_WORDS:
+        return None
+    if len(words) > CONTEXT_COMMAND_MAX_WORDS:
+        return None
+    for candidate in (words[-1], words[0]):
+        if BARE_COMMANDS.match(candidate) or SHUTUP_COMMANDS.match(candidate):
+            return candidate
+    return None
 
 
 # --- микрофон + VAD ---------------------------------------------------------
@@ -412,12 +430,15 @@ def main() -> None:
 
             command = extract_command(text)
             if command is None:
-                normalized = " ".join(_normalize_words(text))
+                words = _normalize_words(text)
+                normalized = " ".join(words)
                 if time.monotonic() < follow_until:
                     command = normalized
                     follow_until = 0.0
                 elif BARE_COMMANDS.match(normalized) or SHUTUP_COMMANDS.match(normalized):
                     command = normalized  # управляющая команда — можно без имени
+                else:
+                    command = control_in_context(words)  # «…приложением, продолжай»
             if command is None:
                 print(f"   · мимо: «{text}»  [stt {stt_ms:.0f}ms]")
                 continue

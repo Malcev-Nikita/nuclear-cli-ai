@@ -261,6 +261,30 @@ class Nuclear:
         self.mcp.call("Queue.goToPrevious")
         return "Предыдущий трек"
 
+    def play_youtube(self, query: str) -> str:
+        """Обычный YouTube (не YT Music): видосы, миксы, подкасты, лекции.
+
+        Плагин puer-youtube стримит по точному видео-ID, когда
+        source.provider == "youtube" — картинки не будет, только звук.
+        """
+        videos = _youtube_search(query)
+        if not videos:
+            return f"На ютубе ничего не нашлось по запросу «{query}»"
+        video = videos[0]
+        track = {
+            "title": video["title"],
+            "artists": [{"name": video["channel"] or "YouTube", "roles": ["main"]}],
+            "source": {
+                "provider": "youtube",
+                "id": video["videoId"],
+                "url": f"https://www.youtube.com/watch?v={video['videoId']}",
+            },
+        }
+        if video.get("durationMs"):
+            track["durationMs"] = video["durationMs"]
+        self.replace_queue_and_play([track])
+        return f"Включаю с ютуба: {video['title']}"
+
     def play_favorites(self) -> str:
         # getTracks возвращает обёртки FavoriteEntry {ref: Track, addedAtIso};
         # в очередь можно класть только сам трек из ref — обёртка роняет UI Nuclear.
@@ -356,6 +380,60 @@ def get_date() -> str:
 
     now = datetime.now()
     return f"Сегодня {now.day} {_MONTHS_GEN[now.month - 1]}, {_WEEKDAYS[now.weekday()]}"
+
+
+def _walk_json(obj, key: str):
+    """Все значения по ключу на любой глубине вложенного JSON."""
+    if isinstance(obj, dict):
+        if key in obj:
+            yield obj[key]
+        for value in obj.values():
+            yield from _walk_json(value, key)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from _walk_json(value, key)
+
+
+def _youtube_search(query: str, limit: int = 5) -> list[dict]:
+    """Поиск по обычному YouTube через InnerTube WEB (внутренний API сайта, без ключа)."""
+    resp = requests.post(
+        "https://www.youtube.com/youtubei/v1/search?prettyPrint=false",
+        json={
+            "context": {"client": {"clientName": "WEB", "clientVersion": "2.20250101.00.00"}},
+            "query": query,
+        },
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    videos = []
+    for renderer in _walk_json(resp.json(), "videoRenderer"):
+        try:
+            video = {
+                "videoId": renderer["videoId"],
+                "title": "".join(r["text"] for r in renderer["title"]["runs"]),
+                "channel": renderer.get("ownerText", {}).get("runs", [{}])[0].get("text", ""),
+                "durationMs": _duration_ms(renderer.get("lengthText", {}).get("simpleText")),
+            }
+        except (KeyError, IndexError):
+            continue
+        videos.append(video)
+        if len(videos) >= limit:
+            break
+    return videos
+
+
+def _duration_ms(text: str | None) -> int | None:
+    if not text:
+        return None  # у стримов длительности нет
+    try:
+        parts = [int(p) for p in text.split(":")]
+    except ValueError:
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + part
+    return seconds * 1000
 
 
 def web_search(query: str, limit: int = 5) -> list[tuple[str, str]]:
@@ -559,6 +637,13 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
         # «все песни из Х» (саундтрек, не исполнитель) — пусть решает LLM.
         (r"^(?:(?:включ\w+|поставь|запусти)\s+)?все (?:песни|треки) (?!из\s)(.+)$",
          lambda m: player.play_artist(m.group(1))),
+        # Обычный YouTube: «включи с ютуба X», «включи видос X», «включи X с ютуба».
+        (r"^(?:включ\w+|поставь|запусти)\s+(?:с|из)\s+ют[юу]б\w*\s+(.+)$",
+         lambda m: player.play_youtube(m.group(1))),
+        (r"^(?:включ\w+|поставь|запусти)\s+(?:видео|видос\w*|ролик)\s+(.+?)(?:\s+(?:с|на|из)\s+ют[юу]б\w*)?$",
+         lambda m: player.play_youtube(m.group(1))),
+        (r"^(?:включ\w+|поставь|запусти)\s+(.+?)\s+(?:с|из|на)\s+ют[юу]б\w*$",
+         lambda m: player.play_youtube(m.group(1))),
         # Явно названный тип — детерминированно, без LLM (экономит секунды на команду).
         (r"^(?:(?:включ\w+|поставь|запусти)\s+)?альбом\s+(.+)$",
          lambda m: player.play_album(m.group(1))),
@@ -631,6 +716,9 @@ def build_llm_tools() -> list[dict]:
              {"city": {"type": "string", "description": "Город, если назван; иначе пустая строка"}}),
         tool("web_search", "Найти в интернете ответ на вопрос о фактах, людях, событиях, новостях",
              {"query": {"type": "string", "description": "Поисковый запрос"}}, ["query"]),
+        tool("play_youtube", "Включить видео/ролик/микс/подкаст с обычного YouTube "
+                             "(когда просят именно ютуб или видео, а не песню)",
+             {"query": query}, ["query"]),
         tool("get_time", "Сказать текущее время"),
         tool("get_date", "Сказать сегодняшнюю дату и день недели"),
     ]
@@ -656,6 +744,7 @@ class Agent:
             "set_volume": lambda a: player.set_volume(int(a["level"])),
             "get_weather": lambda a: get_weather(a.get("city") or ""),
             "web_search": lambda a: self.answer_from_web(a["query"]),
+            "play_youtube": lambda a: player.play_youtube(a["query"]),
             "get_time": lambda a: get_time(),
             "get_date": lambda a: get_date(),
         }

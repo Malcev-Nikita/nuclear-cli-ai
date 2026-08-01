@@ -34,7 +34,7 @@ WHISPER_BEAM = int(os.environ.get("WHISPER_BEAM", "5"))  # 1 = жадный (б�
 # Имена, на которые откликается ассистент (через запятую, регистр не важен).
 ASSISTANT_NAMES = [
     n.strip().lower().replace("ё", "е")
-    for n in os.environ.get("ASSISTANT_NAMES", "игорь").split(",")
+    for n in os.environ.get("ASSISTANT_NAMES", "мага").split(",")
     if n.strip()
 ]
 MIC_DEVICE = os.environ.get("MIC_DEVICE")  # индекс или подстрока имени; пусто = дефолтный
@@ -50,7 +50,7 @@ MAX_UTTER_SEC = 12.0
 MIN_UTTER_SEC = 0.4
 VAD_GAIN = 3.0  # речь = громче адаптивного шумового пола во столько раз
 VAD_ABS_MIN = 0.006  # но не тише этого RMS (защита от «речи» в полной тишине)
-FOLLOWUP_SEC = 8.0  # после «Игорь» без команды столько секунд ждём команду без имени
+FOLLOWUP_SEC = 4.0  # после «Мага» без команды столько секунд ждём команду без имени
 
 # Типичные галлюцинации whisper на шуме/музыке — не считаем их речью.
 _JUNK = re.compile(
@@ -87,10 +87,10 @@ def _is_name(word: str, names: list[str] = ASSISTANT_NAMES) -> bool:
 
 def extract_command(text: str, names: list[str] = ASSISTANT_NAMES) -> str | None:
     """Ищет имя ассистента в любом месте фразы (VAD может склеить несколько
-    предложений — «Играй. Он делает. Игорь, стоп» должно сработать).
+    предложений — «Играй. Он делает. Мага, стоп» должно сработать).
 
     Возвращает: команду после имени (последнее вхождение с продолжением);
-    "" если после имени слов нет («Игорь!»); None, если имени нет вовсе.
+    "" если после имени слов нет («Мага!»); None, если имени нет вовсе.
     """
     words = _normalize_words(text)
     hits = [i for i, word in enumerate(words) if _is_name(word, names)]
@@ -238,7 +238,7 @@ class Transcriber:
 
     def transcribe(self, audio) -> str:
         # Без initial_prompt: whisper на шуме/музыке «эхом» дописывал текст
-        # подсказки, и ассистент сам себе командовал «Игорь, включи музыку»
+        # подсказки, и ассистент сам себе командовал «Мага, включи музыку»
         # (подтверждено вживую 2026-08-01). Вместо подсказки — фильтр по
         # уверенности: галлюцинации приходят с низким avg_logprob.
         segments, _ = self.model.transcribe(

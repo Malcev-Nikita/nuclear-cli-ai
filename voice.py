@@ -46,17 +46,25 @@ VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
 SAMPLE_RATE = 16000  # частота, которую ест whisper
 BLOCK = 512  # 32 мс на блок
 PRE_ROLL_SEC = 0.4  # хвост до срабатывания VAD, чтобы не резать первый слог
-SILENCE_END_SEC = 1.1  # столько тишины закрывает фразу (меньше — режет команды на полуслове)
+SILENCE_END_SEC = 0.9  # столько тишины закрывает фразу; меньше = быстрее реакция
+                       # на команды подряд, но длинные фразы режутся на полуслове
 MAX_UTTER_SEC = 12.0
 MIN_UTTER_SEC = 0.4
-VAD_GAIN = 3.0  # речь = громче адаптивного шумового пола во столько раз
-VAD_ABS_MIN = 0.006  # но не тише этого RMS (защита от «речи» в полной тишине)
+VAD_GAIN = 2.5  # речь = громче адаптивного шумового пола во столько раз
+VAD_ABS_MIN = 0.004  # но не тише этого RMS (защита от «речи» в полной тишине)
 FOLLOWUP_SEC = 4.0  # после «Мага» без команды столько секунд ждём команду без имени
 
 # Типичные галлюцинации whisper на шуме/музыке — не считаем их речью.
 _JUNK = re.compile(
     r"субтитр|dimatorzok|редактор|продолжение следует|спасибо за просмотр",
     re.IGNORECASE,
+)
+
+# Короткие управляющие команды, принимаемые БЕЗ имени. Список узкий намеренно:
+# всё, что здесь есть, может сработать от чужого разговора или телевизора.
+BARE_COMMANDS = re.compile(
+    r"^(стоп|стой|хватит|пауза|подожди|играй|продолжи|продолжай|дальше|"
+    r"следующ\w+|пропусти|скип|назад|предыдущ\w+|громче|погромче|тише|потише)$"
 )
 
 
@@ -386,9 +394,13 @@ def main() -> None:
                 continue
 
             command = extract_command(text)
-            if command is None and time.monotonic() < follow_until:
-                command = " ".join(_normalize_words(text))
-                follow_until = 0.0
+            if command is None:
+                normalized = " ".join(_normalize_words(text))
+                if time.monotonic() < follow_until:
+                    command = normalized
+                    follow_until = 0.0
+                elif BARE_COMMANDS.match(normalized):
+                    command = normalized  # управляющая команда — можно без имени
             if command is None:
                 print(f"   · мимо: «{text}»  [stt {stt_ms:.0f}ms]")
                 continue

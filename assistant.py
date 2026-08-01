@@ -375,7 +375,7 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
 
     rules: list[tuple[str, callable]] = [
         (r"^(пауза|стоп музыка|подожди|pause)$", lambda m: player.pause()),
-        (r"^(стоп|выключи|stop)$", lambda m: player.stop()),
+        (r"^(стоп|стой|остановись|хватит|замолчи|выключи|stop)$", lambda m: player.stop()),
         (r"^(играй|продолжи|продолжай|воспроизведи|play|плей)$", lambda m: player.resume()),
         (r"^(дальше|следующ\w*|скип|пропусти|next|skip)$", lambda m: player.next_track()),
         (r"^(назад|предыдущ\w*|prev|back)$", lambda m: player.previous_track()),
@@ -386,6 +386,8 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
         (r"^(в избранное|лайк|нравится|сохрани)$", lambda m: player.favorite_current()),
         (r"^(включи |поставь |запусти )?(избранн\w+|любим\w+)( треки| музыку| песни)?$",
          lambda m: player.play_favorites()),
+        (r"^(?:включи |поставь |запусти )?все (?:песни|треки) (.+)$",
+         lambda m: player.play_artist(m.group(1))),
         (r"^(перемешай|шафл|shuffle)$", lambda m: player.set_shuffle(True)),
         (r"^(по порядку|без шафла)$", lambda m: player.set_shuffle(False)),
     ]
@@ -421,7 +423,8 @@ def build_llm_tools() -> list[dict]:
     query = {"type": "string", "description": "Название так, как сказал пользователь"}
     return [
         tool("play_track", "Найти и включить конкретную песню", {"query": query}, ["query"]),
-        tool("play_artist", "Включить топ-треки исполнителя", {"name": query}, ["name"]),
+        tool("play_artist", "Включить песни исполнителя («включи X», «все песни X»)",
+             {"name": query}, ["name"]),
         tool("play_album", "Найти и включить альбом целиком", {"name": query}, ["name"]),
         tool("play_playlist", "Включить плейлист по названию", {"name": query}, ["name"]),
         tool("pause", "Поставить на паузу"),
@@ -429,7 +432,8 @@ def build_llm_tools() -> list[dict]:
         tool("next_track", "Переключить на следующий трек"),
         tool("previous_track", "Вернуться к предыдущему треку"),
         tool("favorite_current", "Добавить текущий играющий трек в избранное"),
-        tool("play_favorites", "Включить все избранные (любимые) треки пользователя"),
+        tool("play_favorites", "Включить сохранённое избранное (только «включи избранное/любимое», "
+                               "НЕ для песен конкретного исполнителя)"),
         tool("now_playing", "Сказать, что сейчас играет"),
         tool("set_volume", "Установить громкость в процентах",
              {"level": {"type": "integer", "description": "0-100"}}, ["level"]),

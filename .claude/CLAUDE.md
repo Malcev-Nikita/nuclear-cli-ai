@@ -89,9 +89,12 @@ uv run --python 3.12 --with requests python assistant.py
   `artists`/`title`, внутреннее хранилище (избранное) — `artist`/`name`.
   `Queue.addToQueue` переваривает только поисковый формат; сырой трек из
   избранного роняет рендерер Nuclear, а так как очередь персистится, Nuclear
-  перестаёт стартовать (лечение: убить процесс, вычистить queue-ключи из
-  `%APPDATA%\nuclear\config.json`). Перед addToQueue всё прогонять через
-  `_as_search_track`.
+  перестаёт стартовать (лечение: убить процесс `nuclear-music-player`, убрать
+  `%APPDATA%\com.nuclearplayer\queue.json`). Перед addToQueue всё прогонять
+  через `_as_search_track`.
+- **Данные Nuclear на диске** (Windows): `%APPDATA%\com.nuclearplayer\` —
+  `queue.json`, `favorites.json`, `settings.json`, `playlists/`, `plugins/`,
+  `active-providers.json`. Процесс называется `nuclear-music-player`.
 - **faster-whisper на GPU (Windows)**: `WhisperModel(device="cuda")` создаётся
   успешно, а падает только первый encode — «Library cublas64_12.dll is not
   found». Лечение: pip-пакеты `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (уже в

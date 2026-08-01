@@ -29,6 +29,7 @@ from config import (
     BLOCK,
     CONTEXT_COMMAND_MAX_WORDS,
     FOLLOWUP_SEC,
+    MAX_LAG_SEC,
     MAX_UTTER_SEC,
     MIC_DEVICE,
     MIN_UTTER_SEC,
@@ -174,8 +175,17 @@ class MicSegmenter:
         silent_blocks = 0
         end_blocks = int(SILENCE_END_SEC * SAMPLE_RATE / BLOCK)
         max_blocks = int(MAX_UTTER_SEC * SAMPLE_RATE / BLOCK)
+        max_lag_blocks = int(MAX_LAG_SEC * SAMPLE_RATE / BLOCK)
 
         while True:
+            # Отстали от реального времени (пока думали/говорили, микрофон писал) —
+            # выбрасываем старьё, слушаем «сейчас». Иначе лаг копится бесконечно.
+            if capture is None and self._queue.qsize() > max_lag_blocks:
+                lag = self._queue.qsize() * BLOCK / SAMPLE_RATE
+                self.flush()
+                pre_roll = []
+                print(f"   (отстал на {lag:.1f} с — пропускаю старый звук)")
+
             block = self._queue.get()[:, 0]
             rms = float(np.sqrt(np.mean(block**2)))
             threshold = max(VAD_ABS_MIN, self._noise * VAD_GAIN)
@@ -193,6 +203,10 @@ class MicSegmenter:
                 continue
 
             capture.append(block)
+            # Медленная адаптация шумового пола и во время записи: непрерывная
+            # музыка иначе держит VAD «в речи» вечно — ассистент глохнет и
+            # молотит whisper'ом музыку кусками по MAX_UTTER_SEC без пауз.
+            self._noise = 0.998 * self._noise + 0.002 * rms
             silent_blocks = 0 if is_speech else silent_blocks + 1
             if silent_blocks >= end_blocks or len(capture) >= max_blocks:
                 audio = np.concatenate(capture)

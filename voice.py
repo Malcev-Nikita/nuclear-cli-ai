@@ -26,10 +26,11 @@ import assistant
 
 # --- конфиг -----------------------------------------------------------------
 
-# small — разумный баланс для русского; на GPU можно medium или large-v3-turbo.
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+# large-v3-turbo — лучший русский при ~1.5 ГБ VRAM; small путает сленг и имена
+# артистов (проверено вживую). На слабой машине: WHISPER_MODEL=small.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "auto")  # auto | cuda | cpu
-WHISPER_BEAM = int(os.environ.get("WHISPER_BEAM", "1"))  # 1 = жадный, минимум латентности
+WHISPER_BEAM = int(os.environ.get("WHISPER_BEAM", "5"))  # 1 = жадный (быстрее, но хуже имена)
 # Имена, на которые откликается ассистент (через запятую, регистр не важен).
 ASSISTANT_NAMES = [
     n.strip().lower().replace("ё", "е")
@@ -82,18 +83,21 @@ def _is_name(word: str, names: list[str] = ASSISTANT_NAMES) -> bool:
 
 
 def extract_command(text: str, names: list[str] = ASSISTANT_NAMES) -> str | None:
-    """Ищет имя ассистента в первых словах фразы.
+    """Ищет имя ассистента в любом месте фразы (VAD может склеить несколько
+    предложений — «Играй. Он делает. Игорь, стоп» должно сработать).
 
-    Возвращает: команду после имени; "" если фраза — только имя («Игорь!»);
-    None, если имени нет и фразу надо игнорировать.
+    Возвращает: команду после имени (последнее вхождение с продолжением);
+    "" если после имени слов нет («Игорь!»); None, если имени нет вовсе.
     """
     words = _normalize_words(text)
-    if not words:
+    hits = [i for i, word in enumerate(words) if _is_name(word, names)]
+    if not hits:
         return None
-    for i, word in enumerate(words[:3]):
-        if _is_name(word, names):
-            return " ".join(words[i + 1:])
-    return None
+    for i in reversed(hits):
+        tail = words[i + 1:]
+        if tail:
+            return " ".join(tail)
+    return ""
 
 
 def looks_like_junk(text: str) -> bool:
@@ -229,7 +233,11 @@ class Transcriber:
             vad_filter=True,
             condition_on_previous_text=False,
             # Подсказка смещает распознавание к имени ассистента и командам.
-            initial_prompt=f"{ASSISTANT_NAMES[0].capitalize()}, включи музыку. Пауза. Дальше.",
+            initial_prompt=(
+                f"Команды голосовому ассистенту. {ASSISTANT_NAMES[0].capitalize()}, "
+                "включи музыку. Поставь следующий трек. Пауза. Стоп. Громче. "
+                "Включи избранное. Что сейчас играет?"
+            ),
         )
         return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.7).strip()
 

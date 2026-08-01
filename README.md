@@ -52,7 +52,7 @@ python voice.py --devices          # список микрофонов (выбо
 | `OLLAMA_MODEL` | `qwen3:4b` | на Pi: `qwen3:1.7b` или `qwen3:0.6b` |
 | `OLLAMA_KEEP_ALIVE` | `30m` | сколько держать модель в памяти |
 | `ASSISTANT_NAMES` | `игорь` | имена через запятую: `игорь,гарик,ассистент` |
-| `WHISPER_MODEL` | `small` | `medium`/`large-v3-turbo` — точнее, но тяжелее |
+| `WHISPER_MODEL` | `large-v3-turbo` | на слабой машине: `small` (хуже имена артистов) |
 | `WHISPER_DEVICE` | `auto` | `cuda` / `cpu` (auto пробует cuda, падает на cpu) |
 | `MIC_DEVICE` | системный | индекс или часть имени из `voice.py --devices` |
 

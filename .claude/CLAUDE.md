@@ -44,7 +44,7 @@ uv run --python 3.12 --with requests python assistant.py
 
 - **Роутер до LLM**: частые команды (пауза/дальше/громче/лайк/что играет) — regex,
   ноль латентности. На Pi это большинство команд, и это главный способ сделать Pi реальным.
-- **11 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
+- **12 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
   (`list_methods`/`call`...): иначе модель тратит 3-4 discovery-раунда на команду.
 - **Один вызов LLM на команду**: результат инструмента отдаётся пользователю напрямую,
   без второго круга через модель (латентность).
@@ -83,17 +83,15 @@ uv run --python 3.12 --with requests python assistant.py
 - **qwen3:1.7b может выдать tool call текстом** (`{"name": ...}` в content вместо
   tool_calls) — в `_handle_with_llm` есть фолбэк `_parse_text_tool_call`.
   Подтверждено вживую 2026-08-01 на «включи избранное».
-- **Чтение избранного**: имя метода не задокументировано; `_favorites_tracks`
-  пробует `Favorites.getTracks`, при ошибке discovery через мета-инструмент
-  `list_methods` (фильтр Favorites.*track*). Какой метод реально сработал у
-  пользователя — ещё не подтверждено; когда подтвердится, захардкодить.
-- **Два формата треков** (стоило крэша Nuclear 2026-08-01): поиск отдаёт
-  `artists`/`title`, внутреннее хранилище (избранное) — `artist`/`name`.
-  `Queue.addToQueue` переваривает только поисковый формат; сырой трек из
-  избранного роняет рендерер Nuclear, а так как очередь персистится, Nuclear
-  перестаёт стартовать (лечение: убить процесс `nuclear-music-player`, убрать
-  `%APPDATA%\com.nuclearplayer\queue.json`). Перед addToQueue всё прогонять
-  через `_as_search_track`.
+- **`Favorites.getTracks` возвращает обёртки, не треки** (стоило двух крэшей
+  Nuclear 2026-08-01): `FavoriteEntry<Track>[] = [{ref: Track, addedAtIso}]` —
+  подтверждено исходниками (plugin-sdk/src/types/favorites.ts). В
+  `Queue.addToQueue` класть только `entry["ref"]`; обёртка роняет рендерер, а
+  так как очередь персистится, Nuclear перестаёт стартовать (лечение: убить
+  процесс `nuclear-music-player`, убрать `%APPDATA%\com.nuclearplayer\queue.json`).
+  Формат трека единый (`title`/`artists`), никакой конвертации не нужно.
+  Полный список методов MCP — в plugin-sdk/src/mcp/*.meta.ts
+  репозитория nukeop/nuclear (Nuclear теперь на Tauri, MCP-мост в src-tauri/src/mcp/).
 - **Данные Nuclear на диске** (Windows): `%APPDATA%\com.nuclearplayer\` —
   `queue.json`, `favorites.json`, `settings.json`, `playlists/`, `plugins/`,
   `active-providers.json`. Процесс называется `nuclear-music-player`.

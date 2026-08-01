@@ -109,31 +109,17 @@ class McpClient:
 
     def call(self, method: str, params: dict | None = None):
         """Вызов Nuclear API: tools/call -> инструмент `call` -> Domain.method."""
-        arguments: dict = {"method": method}
-        if params is not None:
-            arguments["params"] = params
-        return self.call_tool("call", arguments)
-
-    def list_methods(self) -> list[str]:
-        """Мета-инструмент MCP: список доступных методов Nuclear API."""
-        result = self.call_tool("list_methods", {})
-        if isinstance(result, dict):
-            return [f"{domain}.{m}" for domain, ms in result.items()
-                    if isinstance(ms, list) for m in ms]
-        if isinstance(result, list):
-            return [m if isinstance(m, str) else m.get("name", "")
-                    for m in result]
-        return []
-
-    def call_tool(self, tool: str, arguments: dict):
         if not self.session_id:
             self.handshake()
 
+        arguments: dict = {"method": method}
+        if params is not None:
+            arguments["params"] = params
         body = {
             "jsonrpc": "2.0",
             "id": self._next_id(),
             "method": "tools/call",
-            "params": {"name": tool, "arguments": arguments},
+            "params": {"name": "call", "arguments": arguments},
         }
 
         resp = self._post(body)
@@ -268,38 +254,14 @@ class Nuclear:
         return "Предыдущий трек"
 
     def play_favorites(self) -> str:
-        tracks = self._favorites_tracks()
-        if isinstance(tracks, dict):
-            tracks = tracks.get("tracks", [])
+        # getTracks возвращает обёртки FavoriteEntry {ref: Track, addedAtIso};
+        # в очередь можно класть только сам трек из ref — обёртка роняет UI Nuclear.
+        entries = self.mcp.call("Favorites.getTracks") or []
+        tracks = [e["ref"] for e in entries if isinstance(e, dict) and e.get("ref")]
         if not tracks:
             return "В избранном пока пусто"
-        # Избранное хранится во внутреннем формате (artist/name), а очередь ждёт
-        # формат поиска (artists/title); сырой трек из избранного роняет UI Nuclear.
-        self.replace_queue_and_play([_as_search_track(t) for t in tracks])
+        self.replace_queue_and_play(tracks)
         return f"Включаю избранное: {len(tracks)} треков"
-
-    def _favorites_tracks(self) -> list | dict:
-        """Имя метода чтения избранного не задокументировано — обнаруживаем через list_methods."""
-        try:
-            return self.mcp.call("Favorites.getTracks") or []
-        except NuclearError:
-            pass
-        candidates = [
-            m for m in self.mcp.list_methods()
-            if m.lower().startswith("favorites.") and "track" in m.lower()
-            and any(v in m.lower() for v in ("get", "list", "all"))
-        ]
-        for method in candidates:
-            try:
-                result = self.mcp.call(method)
-                if result:
-                    return result
-            except NuclearError:
-                continue
-        raise NuclearError(
-            "Не нашёл метод чтения избранного (пробовал Favorites.getTracks"
-            + (", " + ", ".join(candidates) if candidates else "") + ")"
-        )
 
     def favorite_current(self) -> str:
         item = self.mcp.call("Queue.getCurrentItem")
@@ -339,19 +301,6 @@ class Nuclear:
         if isinstance(current, (int, float)) and current <= 1:
             return round(level_pct / 100, 2)
         return level_pct
-
-
-def _as_search_track(track: dict) -> dict:
-    """Внутренний формат Nuclear (artist/name) -> формат поиска (artists/title)."""
-    out = dict(track)
-    if not out.get("artists"):
-        artist = out.get("artist")
-        if isinstance(artist, dict):
-            artist = artist.get("name")
-        out["artists"] = [{"name": artist}] if artist else []
-    if not out.get("title"):
-        out["title"] = out.get("name") or "?"
-    return out
 
 
 def _fmt_track(track: dict) -> str:

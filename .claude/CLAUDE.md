@@ -78,6 +78,13 @@ uv run --python 3.12 --with requests python assistant.py
   по текущему значению `Playback.getVolume`.
 - PowerShell `Invoke-WebRequest` кодирует строковое тело НЕ в UTF-8 — в примерах
   для пользователя слать `[System.Text.Encoding]::UTF8.GetBytes(...)`.
+- **qwen3:1.7b может выдать tool call текстом** (`{"name": ...}` в content вместо
+  tool_calls) — в `_handle_with_llm` есть фолбэк `_parse_text_tool_call`.
+  Подтверждено вживую 2026-08-01 на «включи избранное».
+- **Чтение избранного**: имя метода не задокументировано; `_favorites_tracks`
+  пробует `Favorites.getTracks`, при ошибке discovery через мета-инструмент
+  `list_methods` (фильтр Favorites.*track*). Какой метод реально сработал у
+  пользователя — ещё не подтверждено; когда подтвердится, захардкодить.
 - **faster-whisper на GPU (Windows)**: `WhisperModel(device="cuda")` создаётся
   успешно, а падает только первый encode — «Library cublas64_12.dll is not
   found». Лечение: pip-пакеты `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (уже в

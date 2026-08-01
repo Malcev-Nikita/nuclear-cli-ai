@@ -109,17 +109,31 @@ class McpClient:
 
     def call(self, method: str, params: dict | None = None):
         """Вызов Nuclear API: tools/call -> инструмент `call` -> Domain.method."""
-        if not self.session_id:
-            self.handshake()
-
         arguments: dict = {"method": method}
         if params is not None:
             arguments["params"] = params
+        return self.call_tool("call", arguments)
+
+    def list_methods(self) -> list[str]:
+        """Мета-инструмент MCP: список доступных методов Nuclear API."""
+        result = self.call_tool("list_methods", {})
+        if isinstance(result, dict):
+            return [f"{domain}.{m}" for domain, ms in result.items()
+                    if isinstance(ms, list) for m in ms]
+        if isinstance(result, list):
+            return [m if isinstance(m, str) else m.get("name", "")
+                    for m in result]
+        return []
+
+    def call_tool(self, tool: str, arguments: dict):
+        if not self.session_id:
+            self.handshake()
+
         body = {
             "jsonrpc": "2.0",
             "id": self._next_id(),
             "method": "tools/call",
-            "params": {"name": "call", "arguments": arguments},
+            "params": {"name": tool, "arguments": arguments},
         }
 
         resp = self._post(body)
@@ -253,6 +267,38 @@ class Nuclear:
         self.mcp.call("Queue.goToPrevious")
         return "Предыдущий трек"
 
+    def play_favorites(self) -> str:
+        tracks = self._favorites_tracks()
+        if isinstance(tracks, dict):
+            tracks = tracks.get("tracks", [])
+        if not tracks:
+            return "В избранном пока пусто"
+        self.replace_queue_and_play(tracks)
+        return f"Включаю избранное: {len(tracks)} треков"
+
+    def _favorites_tracks(self) -> list | dict:
+        """Имя метода чтения избранного не задокументировано — обнаруживаем через list_methods."""
+        try:
+            return self.mcp.call("Favorites.getTracks") or []
+        except NuclearError:
+            pass
+        candidates = [
+            m for m in self.mcp.list_methods()
+            if m.lower().startswith("favorites.") and "track" in m.lower()
+            and any(v in m.lower() for v in ("get", "list", "all"))
+        ]
+        for method in candidates:
+            try:
+                result = self.mcp.call(method)
+                if result:
+                    return result
+            except NuclearError:
+                continue
+        raise NuclearError(
+            "Не нашёл метод чтения избранного (пробовал Favorites.getTracks"
+            + (", " + ", ".join(candidates) if candidates else "") + ")"
+        )
+
     def favorite_current(self) -> str:
         item = self.mcp.call("Queue.getCurrentItem")
         if not item or not item.get("track"):
@@ -323,6 +369,8 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
         (r"^громкость\s+(\d{1,3})", volume_cmd),
         (r"^(что играет|что сейчас играет|now playing)\??$", lambda m: player.now_playing()),
         (r"^(в избранное|лайк|нравится|сохрани)$", lambda m: player.favorite_current()),
+        (r"^(включи |поставь |запусти )?(избранн\w+|любим\w+)( треки| музыку| песни)?$",
+         lambda m: player.play_favorites()),
         (r"^(перемешай|шафл|shuffle)$", lambda m: player.set_shuffle(True)),
         (r"^(по порядку|без шафла)$", lambda m: player.set_shuffle(False)),
     ]
@@ -365,7 +413,8 @@ def build_llm_tools() -> list[dict]:
         tool("resume", "Продолжить воспроизведение"),
         tool("next_track", "Переключить на следующий трек"),
         tool("previous_track", "Вернуться к предыдущему треку"),
-        tool("favorite_current", "Добавить текущий трек в избранное"),
+        tool("favorite_current", "Добавить текущий играющий трек в избранное"),
+        tool("play_favorites", "Включить все избранные (любимые) треки пользователя"),
         tool("now_playing", "Сказать, что сейчас играет"),
         tool("set_volume", "Установить громкость в процентах",
              {"level": {"type": "integer", "description": "0-100"}}, ["level"]),
@@ -387,6 +436,7 @@ class Agent:
             "next_track": lambda a: player.next_track(),
             "previous_track": lambda a: player.previous_track(),
             "favorite_current": lambda a: player.favorite_current(),
+            "play_favorites": lambda a: player.play_favorites(),
             "now_playing": lambda a: player.now_playing(),
             "set_volume": lambda a: player.set_volume(int(a["level"])),
         }
@@ -431,7 +481,12 @@ class Agent:
         if not tool_calls:
             content = (message.get("content") or "").strip()
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-            return content or "Не понял команду"
+            # qwen3:1.7b иногда пишет tool call текстом вместо настоящего вызова.
+            text_call = _parse_text_tool_call(content)
+            if text_call:
+                tool_calls = [text_call]
+            else:
+                return content or "Не понял команду"
 
         results = []
         for call in tool_calls:
@@ -452,6 +507,21 @@ class Agent:
             except NuclearError as error:
                 results.append(f"Nuclear: {error}")
         return "; ".join(r for r in results if r)
+
+
+def _parse_text_tool_call(content: str) -> dict | None:
+    """{"name": ..., "arguments": {...}} в тексте ответа -> формат tool_calls."""
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+    if not match:
+        return None
+    try:
+        obj = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict) or "name" not in obj:
+        return None
+    arguments = obj.get("arguments") or obj.get("parameters") or {}
+    return {"function": {"name": obj["name"], "arguments": arguments}}
 
 
 # ---------------------------------------------------------------------------

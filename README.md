@@ -20,12 +20,10 @@
 
 ```powershell
 cd nuclear-cli-ai
-python -m pip install -r requirements.txt
-python assistant.py                # этап 1: текстовые команды
-
 python -m pip install -r requirements-voice.txt
-python voice.py                    # этап 2: голос (микрофон + wake-имя)
-python voice.py --devices          # список микрофонов (выбор — env MIC_DEVICE)
+python main.py                     # голосовой режим
+python main.py --text              # текстовый REPL (без микрофона и озвучки)
+python main.py --devices           # список микрофонов
 ```
 
 Голосовой режим: скажите **«Мага, включи нирвану»** — фразы без имени
@@ -53,9 +51,12 @@ python voice.py --devices          # список микрофонов (выбо
 
 ## Конфиг
 
-Все настройки — в **`config.py`** (подключения, имя ассистента, VAD, whisper,
-голос, погода), там же комментарии, что на что влияет. Значения из таблицы ниже
-можно переопределять и переменными окружения, не трогая файл:
+Все настройки — в **`config.toml`** (подключения, имя ассистента, VAD, whisper,
+голос, погода), у каждой — комментарий, что на что влияет. Личные значения
+(имя, город, голос) кладите в **`config.local.toml`** (скопируйте
+`config.local.toml.example` и оставьте только нужное) — он в `.gitignore`,
+обновления проекта его не тронут. Приоритет: env-переменные →
+`config.local.toml` → `config.toml`:
 
 | Переменная | По умолчанию | Зачем |
 | --- | --- | --- |
@@ -74,6 +75,23 @@ python voice.py --devices          # список микрофонов (выбо
 ```powershell
 $env:OLLAMA_MODEL = "qwen3:1.7b"; python assistant.py
 ```
+
+## Структура
+
+```
+main.py           # точка входа (сборка сервисов, навыков, агента; оба режима)
+config.toml       # настройки; config.local.toml — личные (в .gitignore)
+config.py         # загрузчик настроек
+src/core/         # ядро: wake-логика, агент, тексты — не знает о внешнем мире
+src/services/     # адаптеры: Nuclear MCP, Ollama, Open-Meteo, DDG, YouTube
+src/audio/        # микрофон+VAD, whisper, piper (barge-in)
+src/skills/       # навыки: playback, music, favorites, youtube, weather,
+                  #         clock, search — правила роутера + инструменты LLM
+tests/            # pytest: uv run --with requests --with pytest -m pytest tests
+```
+
+Новая способность = новый класс в `src/skills/` (правила + инструменты + логика)
+и одна строчка в сборке `main.py`.
 
 ## Архитектура и решения
 

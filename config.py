@@ -1,168 +1,108 @@
-"""Все настройки Nuclear CLI AI в одном месте.
+"""Загрузчик настроек: config.toml (дефолты) <- config.local.toml (личные)
+<- переменные окружения (сильнее всех).
 
-Почти каждую можно переопределить переменной окружения с тем же именем,
-не трогая этот файл: $env:OLLAMA_MODEL = "qwen3:1.7b"; python voice.py
+Сами настройки — в config.toml, тут только код загрузки. Имена констант
+сохранены прежними — остальной код ничего не заметил.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import tomllib
+
+_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_toml(name: str) -> dict:
+    try:
+        with open(os.path.join(_DIR, name), "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"Ошибка в {name}: {error}")
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+_cfg = _merge(_load_toml("config.toml"), _load_toml("config.local.toml"))
+
+
+def _get(section: str, key: str, env: str | None = None, default=None):
+    if env and os.environ.get(env) is not None:
+        return os.environ[env]
+    return _cfg.get(section, {}).get(key, default)
+
+
+def _words_regex(words: list[str]) -> re.Pattern:
+    """Список слов -> регулярка полного совпадения. «следующ*» = любое окончание."""
+    parts = [
+        re.escape(w.strip().lower()[:-1]) + r"\w+" if w.endswith("*")
+        else re.escape(w.strip().lower())
+        for w in words if w.strip()
+    ]
+    return re.compile(r"^(" + "|".join(parts) + r")$")
+
 
 # --- подключения ------------------------------------------------------------
 
-# Адрес MCP-сервера Nuclear — плеера, которым управляем.
-# Берётся из Nuclear: Settings → Integrations → Enable MCP Server.
-# Если порт 8800 занят, Nuclear сам берёт 8801, 8802… — тогда поменять и здесь.
-NUCLEAR_MCP_URL = os.environ.get("NUCLEAR_MCP_URL", "http://127.0.0.1:8800/mcp")
-
-# Адрес Ollama — локального сервера с языковой моделью (мозг для сложных команд).
-# Если Ollama крутится на другом компьютере, указать его IP вместо 127.0.0.1.
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-
-# Какая языковая модель разбирает команды, которые не поймал быстрый роутер
-# («включи что-нибудь весёлое»). Крупнее модель = понятливее, но медленнее:
-# qwen3:4b — быстрая, изредка тупит;.
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
-
-# Сколько Ollama держит модель в оперативке после последней команды.
-# Пока держит — ответы быстрые; выгрузилась — следующая команда ждёт
-# несколько секунд, пока модель загрузится заново. "30m" = 30 минут.
-OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
-
-# Максимум секунд ждать ответа от Nuclear/Ollama, прежде чем сдаться с ошибкой.
-# Большой, потому что первый поиск в YouTube Music бывает очень долгим.
-HTTP_TIMEOUT = 90
-
+NUCLEAR_MCP_URL = _get("connections", "nuclear_mcp_url", "NUCLEAR_MCP_URL")
+OLLAMA_URL = _get("connections", "ollama_url", "OLLAMA_URL")
+OLLAMA_MODEL = _get("connections", "ollama_model", "OLLAMA_MODEL")
+OLLAMA_KEEP_ALIVE = _get("connections", "ollama_keep_alive", "OLLAMA_KEEP_ALIVE")
+HTTP_TIMEOUT = int(_get("connections", "http_timeout", default=90))
 
 # --- имя и поведение ассистента ---------------------------------------------
 
-# Имена, на которые откликается ассистент. Несколько — через запятую:
-# "мага,ассистент". Регистр не важен. Имя ловится нечётко (±1 буква),
-# так что «Мага»/«Мака»/«Магу» — всё сработает.
+_names_raw = _get("assistant", "names", default=["мага"])
+if isinstance(_names_raw, str):  # из env приходит строкой через запятую
+    _names_raw = _names_raw.split(",")
+if os.environ.get("ASSISTANT_NAMES"):
+    _names_raw = os.environ["ASSISTANT_NAMES"].split(",")
 ASSISTANT_NAMES = [
-    n.strip().lower().replace("ё", "е")
-    for n in os.environ.get("ASSISTANT_NAMES", "мага").split(",")
-    if n.strip()
+    n.strip().lower().replace("ё", "е") for n in _names_raw if n.strip()
 ]
 
-# Сказали имя без команды («Мага!») — ассистент ответит «Слушаю» и столько
-# секунд будет принимать команду без имени. Больше = удобнее думать,
-# но дольше окно, в которое случайная фраза уйдёт как команда.
-# (4 секунды не хватало — команда не успевала договориться.)
-FOLLOWUP_SEC = 8.0
-
-# Команды, которые работают ВООБЩЕ без имени — сказал «стоп» и всё.
-# Только короткие управляющие слова, и фраза должна состоять из них целиком
-# («стоп» — да, «да стоп же» — нет). Расширять осторожно: всё, что тут есть,
-# может сработать от телевизора или чужого разговора в комнате.
-BARE_COMMANDS = re.compile(
-    r"^(стоп|стой|хватит|пауза|подожди|играй|продолжи|продолжай|дальше|"
-    r"следующ\w+|пропусти|скип|назад|предыдущ\w+|громче|погромче|тише|потише)$"
-)
-
-# Слова-затычки: мгновенно обрывают речь ассистента и больше ничего не делают.
-# Работают без имени. Музыку не трогают — для неё «стоп»/«пауза».
-SHUTUP_COMMANDS = re.compile(r"^(замолчи|заткнись|помолчи)$")
-
-# Управляющая команда, «вшитая» в обычную речь, тоже срабатывает, если стоит
-# первым или последним словом фразы: «Он может управлять приложением…
-# продолжай» -> продолжай; «Заткнись, сука» -> заткнись. Число — максимум слов
-# во фразе для такого выцепления: в длинном монологе слово «дальше» на конце —
-# скорее случайность, чем команда. 0 = выключить (только точное совпадение
-# всей фразы).
-CONTEXT_COMMAND_MAX_WORDS = 8
-
-# Перебивание озвучки: громкая речь поверх говорящего ассистента запускает
-# проверку — он дослушивает ~1 секунду, распознаёт и замолкает, ТОЛЬКО если
-# услышал «заткнись»/«замолчи» или своё имя (имя + команда — команда
-# выполнится). Чужой разговор рядом его не сбивает. Число — во сколько раз
-# голос должен быть громче эха колонок, чтобы проверка вообще запустилась.
-# Меньше = чувствительнее (чаще гоняет распознавание впустую). 0 = выключить.
-BARGE_GAIN = 2.5
-
+FOLLOWUP_SEC = float(_get("assistant", "followup_sec", default=8.0))
+BARE_COMMANDS = _words_regex(_get("assistant", "bare_commands", default=[]))
+SHUTUP_COMMANDS = _words_regex(_get("assistant", "shutup_commands", default=[]))
+CONTEXT_COMMAND_MAX_WORDS = int(_get("assistant", "context_command_max_words", default=8))
+BARGE_GAIN = float(_get("assistant", "barge_gain", default=2.5))
 
 # --- распознавание речи (faster-whisper) ------------------------------------
 
-# Модель распознавания речи. Определяет, насколько точно ассистент вас слышит:
-#   large-v3-turbo — лучший русский, имена артистов, сленг (~1.5 ГБ видеопамяти);
-#   medium         — компромисс, если turbo не влезает рядом с Ollama;
-#   small          — для слабых машин; путает имена артистов (проверено).
-# Новая модель скачивается один раз при первом запуске.
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
-
-# Где гонять распознавание: "auto" — пробует видеокарту (cuda), не вышло — cpu.
-# Принудительно: "cuda" (упадёт с ошибкой, если карта недоступна) или "cpu".
-WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "auto")
-
-# Насколько тщательно whisper перебирает варианты услышанного (beam search).
-# 5 — точнее, особенно имена и названия; 1 — быстрее, но больше ослышек.
-WHISPER_BEAM = int(os.environ.get("WHISPER_BEAM", "5"))
-
+WHISPER_MODEL = _get("whisper", "model", "WHISPER_MODEL")
+WHISPER_DEVICE = _get("whisper", "device", "WHISPER_DEVICE")
+WHISPER_BEAM = int(_get("whisper", "beam", "WHISPER_BEAM", default=5))
 
 # --- микрофон и нарезка речи (VAD) ------------------------------------------
 
-# Какой микрофон слушать. Пусто = системный по умолчанию (настройки звука
-# Windows/Linux). Иначе — номер или кусок названия из `python voice.py --devices`.
-MIC_DEVICE = os.environ.get("MIC_DEVICE")
-
-# Частота записи звука, Гц. Whisper обучен на 16000 — не менять.
-SAMPLE_RATE = 16000
-
-# Размер порции звука для анализа, сэмплов (512 = 32 мс). Не менять без нужды.
-BLOCK = 512
-
-# Сколько секунд звука ДО того, как вы заговорили, приклеивать к фразе —
-# чтобы первый слог («Ма-» из «Мага») не обрезался.
-PRE_ROLL_SEC = 0.9
-
-# Сколько секунд тишины считать концом фразы. Меньше = ассистент отвечает
-# быстрее и бодрее реагирует на команды подряд; больше = можно делать паузы
-# посреди фразы, и он дождётся конца, а не оборвёт на полуслове.
-SILENCE_END_SEC = 0.4
-
-# Длиннее этого (секунд) фраза не бывает — принудительно обрезается и уходит
-# на распознавание. Защита от «вечной» записи под музыку.
-MAX_UTTER_SEC = 12.0
-
-# Короче этого (секунд чистой речи) — не фраза, а щелчок/стук; игнорируется.
-MIN_UTTER_SEC = 0.4
-
-# Чувствительность к речи: во сколько раз голос должен быть громче фонового
-# шума, чтобы началась запись. Меньше = ловит тихую речь, но чаще пишет шум;
-# больше = придётся говорить громче (особенно поверх музыки).
-VAD_GAIN = 2.5
-
-# Нижний порог громкости: тише этого — точно не речь, даже в полной тишине.
-# Поднять, если в тихой комнате ассистент «слышит» шорохи и вентилятор.
-VAD_ABS_MIN = 0.004
-
-# Если разбор звука отстал от реального времени сильнее, чем на столько секунд
-# (микрофон записал больше, чем успели обработать), старый звук выбрасывается —
-# ассистент всегда слушает «сейчас», а не догоняет прошлое. Без этого за долгую
-# работу копилось отставание: он «переставал слышать» и отвечал с опозданием.
-MAX_LAG_SEC = 3.0
-
+MIC_DEVICE = _get("microphone", "device", "MIC_DEVICE") or None
+SAMPLE_RATE = int(_get("microphone", "sample_rate", default=16000))
+BLOCK = int(_get("microphone", "block", default=512))
+PRE_ROLL_SEC = float(_get("microphone", "pre_roll_sec", default=0.4))
+SILENCE_END_SEC = float(_get("microphone", "silence_end_sec", default=0.9))
+MAX_UTTER_SEC = float(_get("microphone", "max_utter_sec", default=12.0))
+MIN_UTTER_SEC = float(_get("microphone", "min_utter_sec", default=0.4))
+VAD_GAIN = float(_get("microphone", "vad_gain", default=2.5))
+VAD_ABS_MIN = float(_get("microphone", "vad_abs_min", default=0.004))
+MAX_LAG_SEC = float(_get("microphone", "max_lag_sec", default=3.0))
 
 # --- озвучка ответов (piper) ------------------------------------------------
 
-# Каким голосом ассистент отвечает. Послушать варианты:
-# https://rhasspy.github.io/piper-samples/ (русские: irina, denis, dmitri, ruslan).
-# Пустая строка "" — озвучка выключена, ответы только текстом в консоли.
-# Голос (~60 МБ) скачивается сам при первом запуске в папку voices/.
-PIPER_VOICE = os.environ.get("PIPER_VOICE", "ru_RU-irina-medium")
-
-# Темп речи: 1.0 — как в оригинале голоса, 1.5 — на четверть быстрее,
-# 1.5 — заметно быстрее. Меньше 1.0 — медленнее.
-TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.5"))
-
-# Папка, куда скачиваются модели голосов. Менять незачем.
-VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
-
+PIPER_VOICE = _get("tts", "voice", "PIPER_VOICE")
+TTS_SPEED = float(_get("tts", "speed", "TTS_SPEED", default=1.25))
+VOICES_DIR = os.path.join(_DIR, "voices")
 
 # --- интернет-инструменты ---------------------------------------------------
 
-# Город для «какая погода» без уточнения. Пусто — определится по IP.
-# Погода берётся из Open-Meteo (бесплатно, без ключа, отвечает за ~0.3 с).
-# Город, названный в самой команде («погода в Москве»), всегда важнее.
-WEATHER_CITY = os.environ.get("WEATHER_CITY", "Астрахань")
+WEATHER_CITY = _get("internet", "weather_city", "WEATHER_CITY", default="")

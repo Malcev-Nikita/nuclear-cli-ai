@@ -1,0 +1,13 @@
+# Личные настройки. Скопируй этот файл как config.local.toml и оставь только
+# то, что хочешь поменять — остальное возьмётся из config.toml.
+# config.local.toml в .gitignore: git pull его не тронет.
+
+[assistant]
+names = ["мага"]
+
+[internet]
+weather_city = "Астрахань"
+
+[tts]
+voice = "ru_RU-irina-medium"
+speed = 1.5

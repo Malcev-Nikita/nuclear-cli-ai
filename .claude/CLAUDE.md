@@ -26,21 +26,43 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 - Дальняя цель — перенос на Raspberry Pi: либо лёгкая модель (qwen3:1.7b/0.6b),
   либо Pi как голосовой сателлит, а LLM остаётся на ПК (Nuclear всё равно на ПК).
 
+## Структура (пересобрано 2026-08-02, clean-arch-lite по выбору пользователя)
+
+- `main.py` — точка входа и СБОРКА (сервисы → навыки → агент; порядок навыков =
+  приоритет правил роутера: playback, favorites, youtube, music, weather,
+  clock, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`.
+- `src/core/` — ядро: `wake.py` (WakeMatcher: имя/bare/shutup/контекст,
+  looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
+  SYSTEM_PROMPT), `texts.py` (plural/fmt_track/fmt_time/spoken_duration).
+- `src/services/` — адаптеры, каждый со своими граблями: `nuclear.py`
+  (McpClient + NuclearPlayer, БЕЗ фраз), `ollama.py` (OllamaBrain,
+  strip_think/parse_text_tool_call), `weather.py`, `websearch.py`, `youtube.py`.
+- `src/skills/` — навыки (Skill: rules() + tools(), см. base.py; Tool.query_arg
+  нужен агенту для починки вырожденных ответов): playback, favorites, music
+  (транслит плейлистов, ютуб-фолбэк), youtube, weather, clock, search.
+- `src/audio/` — mic.py (MicSegmenter, анти-лаг), stt.py (Transcriber, CUDA),
+  tts.py (Speaker, умный barge-in).
+- `assistant.py`/`voice.py` — шимы-переадресации на main.py (не удалять сразу).
+- Новая способность = класс в `src/skills/` + строка в сборке `main.py`.
+
 ## Запуск и проверка
 
 ```bash
 # у пользователя (Windows):
-python -m pip install -r requirements.txt && python assistant.py   # этап 1, текст
-python -m pip install -r requirements-voice.txt && python voice.py # этап 2, голос
+python -m pip install -r requirements-voice.txt
+python main.py            # голос;  --text — REPL;  --devices — микрофоны
 
-# в песочнице (python нет, есть uv):
-uv run --python 3.12 --with requests python assistant.py
+# тесты (и в песочнице; 43 шт., гонять после любых правок):
+uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
 ```
 
-Все настройки — в `config.py` (env-переменные с теми же именами переопределяют):
-подключения (NUCLEAR_MCP_URL/OLLAMA_*), имя (`ASSISTANT_NAMES`, сейчас «мага»),
-BARE_COMMANDS, whisper, VAD-пороги, piper (PIPER_VOICE/TTS_SPEED), WEATHER_CITY.
-assistant.py и voice.py импортируют оттуда — новые настройки класть туда же.
+Настройки — в `config.toml` (только данные, с комментариями; по требованию
+пользователя — никакого кода в конфиге). Переопределения: `config.local.toml`
+(личное, в .gitignore, для шаринга проекта) → env-переменные (сильнее всех).
+`config.py` — загрузчик (tomllib, merge, `*` в списках слов → `\w+`), отдаёт
+константы под СТАРЫМИ именами (ASSISTANT_NAMES, BARE_COMMANDS-регулярка и
+т.д.) — код импортирует их как раньше. Новые настройки: ключ в config.toml +
+строка-константа в config.py.
 
 ## Архитектурные решения (не менять без причины)
 

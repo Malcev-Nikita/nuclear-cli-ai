@@ -40,6 +40,7 @@ ASSISTANT_NAMES = [
 MIC_DEVICE = os.environ.get("MIC_DEVICE")  # индекс или подстрока имени; пусто = дефолтный
 # Голос piper для озвучки ответов; пустая строка = TTS выключен.
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "ru_RU-irina-medium")
+TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.5"))  # 1.0 = обычный темп, больше = быстрее
 VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
 
 SAMPLE_RATE = 16000  # частота, которую ест whisper
@@ -265,7 +266,7 @@ class Speaker:
     def __init__(self):
         import subprocess
 
-        from piper import PiperVoice
+        from piper import PiperVoice, SynthesisConfig
 
         model_path = os.path.join(VOICES_DIR, f"{PIPER_VOICE}.onnx")
         if not os.path.exists(model_path):
@@ -276,6 +277,8 @@ class Speaker:
                 cwd=VOICES_DIR, check=True,
             )
         self.voice = PiperVoice.load(model_path)
+        # length_scale — длительность звука: 1/скорость (0.67 при TTS_SPEED=1.5).
+        self._config = SynthesisConfig(length_scale=1.0 / TTS_SPEED)
 
     def say(self, text: str) -> None:
         import numpy as np
@@ -284,7 +287,7 @@ class Speaker:
         text = _sanitize_for_tts(text)
         if not text:
             return
-        chunks = list(self.voice.synthesize(text))
+        chunks = list(self.voice.synthesize(text, syn_config=self._config))
         if not chunks:
             return
         audio = np.frombuffer(

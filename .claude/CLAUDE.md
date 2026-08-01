@@ -51,7 +51,7 @@ uv run --python 3.12 --with requests python assistant.py
   параллельно с загрузкой whisper.
 - Шкала громкости определяется по `getVolume` один раз и кешируется
   (`Nuclear._volume_is_unit`) — «громче» = 2 MCP-вызова, а не 3.
-- **12 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
+- **13 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
   (`list_methods`/`call`...): иначе модель тратит 3-4 discovery-раунда на команду.
 - **Один вызов LLM на команду**: результат инструмента отдаётся пользователю напрямую,
   без второго круга через модель (латентность).
@@ -143,8 +143,13 @@ uv run --python 3.12 --with requests python assistant.py
   (выбран пользователем), скачивается в `voices/` через
   `python -m piper.download_voices`; API: `PiperVoice.load(...).synthesize()`
   → чанки с `audio_int16_bytes`/`sample_rate`, играем sounddevice. После
-  каждой озвучки `mic.flush()` — иначе ассистент слышит сам себя. Ждёт
-  живого прогона (риск: wheels piper-tts под Python 3.14 — тогда `py -3.12`).
+  каждой озвучки `mic.flush()` — иначе ассистент слышит сам себя. Темп речи —
+  `TTS_SPEED` (деф. 1.5; в piper это `SynthesisConfig(length_scale=1/скорость)`).
+  Ждёт живого прогона (риск: wheels piper-tts под Python 3.14 — тогда `py -3.12`).
+- **Погода** (`get_weather` в assistant.py): wttr.in `?format=j1&lang=ru`, без
+  API-ключа; город из команды → `WEATHER_CITY` → по IP (nearest_area). Фраза
+  собирается «под озвучку»: температура словами («плюс 18»). Роутер ловит
+  «какая погода [в X]» / «сколько градусов»; в LLM это инструмент get_weather.
 - Этап 3: демон с автозапуском; вариант Pi-сателлита. Для Pi текущий
   wake-подход (whisper на всё подряд) дорог — вернуться к openWakeWord
   (тренировка кастомного имени) или whisper tiny только как детектор имени.

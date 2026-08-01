@@ -26,6 +26,7 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:1.7b")
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
 HTTP_TIMEOUT = 90  # поиск идёт через InnerTube/yt-dlp, первые запросы бывают долгими
+WEATHER_CITY = os.environ.get("WEATHER_CITY", "")  # пусто = wttr.in определит по IP
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +311,56 @@ class Nuclear:
         return level_pct
 
 
+# ---------------------------------------------------------------------------
+# Интернет-инструменты (не про музыку)
+# ---------------------------------------------------------------------------
+
+def get_weather(city: str = "") -> str:
+    """Погода через wttr.in — без API-ключа; без города определяет его по IP.
+
+    Фраза собирается «под озвучку»: температура словами (плюс/минус N).
+    """
+    city = (city or WEATHER_CITY).strip()
+    try:
+        resp = requests.get(
+            f"https://wttr.in/{requests.utils.quote(city)}?format=j1&lang=ru",
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        current = data["current_condition"][0]
+    except (requests.RequestException, ValueError, KeyError, IndexError) as error:
+        return f"Не смог узнать погоду: {error}"
+
+    desc = (current.get("lang_ru") or current.get("weatherDesc") or [{}])[0].get("value", "")
+    if not city:
+        try:
+            city = data["nearest_area"][0]["areaName"][0]["value"]
+        except (KeyError, IndexError):
+            pass
+
+    place = f" в {city}" if city else ""
+    phrase = f"Сейчас{place} {_spoken_temp(current['temp_C'])}"
+    if desc:
+        phrase += f", {desc.lower()}"
+    phrase += f", ощущается как {_spoken_temp(current['FeelsLikeC'])}"
+    today = (data.get("weather") or [{}])[0]
+    if today.get("mintempC") and today.get("maxtempC"):
+        low = _spoken_temp(today["mintempC"], genitive=True)
+        high = _spoken_temp(today["maxtempC"], genitive=True)
+        phrase += f". Сегодня от {low} до {high}"
+    return phrase
+
+
+def _spoken_temp(value, genitive: bool = False) -> str:
+    degrees = int(value)
+    if degrees > 0:
+        return f"плюс {degrees}"
+    if degrees < 0:
+        return f"минус {abs(degrees)}"
+    return "нуля" if genitive else "ноль"
+
+
 def _fmt_track(track: dict) -> str:
     artists = ", ".join(a.get("name", "") for a in track.get("artists", []) if a.get("name"))
     title = track.get("title", "?")
@@ -356,6 +407,9 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
          lambda m: player.play_track(m.group(1))),
         (r"^(?:включ\w+|поставь|запусти)\s+(?:группу|исполнителя|артиста)\s+(.+)$",
          lambda m: player.play_artist(m.group(1))),
+        (r"^(?:какая\s+)?(?:сейчас\s+)?погода(?:\s+(?:сейчас|сегодня))?(?:\s+(?:в|на)\s+(.+?))?\s*\??$",
+         lambda m: get_weather(m.group(1) or "")),
+        (r"^сколько (?:сейчас )?градусов(?: на улице)?\??$", lambda m: get_weather("")),
         (r"^(перемешай|шафл|shuffle)$", lambda m: player.set_shuffle(True)),
         (r"^(по порядку|без шафла)$", lambda m: player.set_shuffle(False)),
     ]
@@ -370,7 +424,8 @@ SYSTEM_PROMPT = (
     "Ты — голосовой помощник музыкального плеера. На каждую команду пользователя "
     "вызови ровно один подходящий инструмент. Названия песен, исполнителей и плейлистов "
     "передавай так, как их произнёс пользователь, не переводя на другой язык. "
-    "Если команда не про музыку — ответь одной короткой фразой без инструментов."
+    "На вопрос о погоде вызови get_weather. Если команда не про музыку и не про "
+    "погоду — ответь одной короткой фразой без инструментов."
 )
 
 def build_llm_tools() -> list[dict]:
@@ -405,6 +460,8 @@ def build_llm_tools() -> list[dict]:
         tool("now_playing", "Сказать, что сейчас играет"),
         tool("set_volume", "Установить громкость в процентах",
              {"level": {"type": "integer", "description": "0-100"}}, ["level"]),
+        tool("get_weather", "Узнать погоду сейчас и на сегодня",
+             {"city": {"type": "string", "description": "Город, если назван; иначе пустая строка"}}),
     ]
 
 
@@ -426,6 +483,7 @@ class Agent:
             "play_favorites": lambda a: player.play_favorites(),
             "now_playing": lambda a: player.now_playing(),
             "set_volume": lambda a: player.set_volume(int(a["level"])),
+            "get_weather": lambda a: get_weather(a.get("city") or ""),
         }
         self._think_supported = True
         self._http = requests.Session()

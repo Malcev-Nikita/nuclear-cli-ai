@@ -40,7 +40,7 @@ ASSISTANT_NAMES = [
 MIC_DEVICE = os.environ.get("MIC_DEVICE")  # индекс или подстрока имени; пусто = дефолтный
 # Голос piper для озвучки ответов; пустая строка = TTS выключен.
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "ru_RU-irina-medium")
-TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.5"))  # 1.0 = обычный темп, больше = быстрее
+TTS_SPEED = float(os.environ.get("TTS_SPEED", "1.25"))  # 1.0 = обычный темп, больше = быстрее
 VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
 
 SAMPLE_RATE = 16000  # частота, которую ест whisper

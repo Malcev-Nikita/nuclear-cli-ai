@@ -311,55 +311,91 @@ class Speaker:
         # length_scale — длительность звука: 1/скорость (0.67 при TTS_SPEED=1.5).
         self._config = SynthesisConfig(length_scale=1.0 / TTS_SPEED)
 
-    def say(self, text: str, mic: MicSegmenter | None = None) -> None:
-        """Озвучить текст. С mic — можно перебить голосом (barge-in): пока играем,
-        следим за микрофоном, и если пользователь заговорил громче эха нашего же
-        голоса из колонок — замолкаем. После — сбрасываем буфер микрофона."""
+    def say(self, text: str, mic: MicSegmenter | None = None, stt=None) -> str | None:
+        """Озвучить текст. С mic — умное перебивание: громкая речь поверх колонок
+        не обрывает озвучку сразу — дослушиваем ~1 с, распознаём и обрываемся,
+        только если там «заткнись»/имя ассистента. Чужой разговор рядом
+        игнорируется. Возвращает услышанную фразу, если в ней было имя
+        (вызывающий обработает её как команду), иначе None."""
         import numpy as np
         import sounddevice as sd
 
         text = _sanitize_for_tts(text)
         if not text:
-            return
+            return None
         chunks = list(self.voice.synthesize(text, syn_config=self._config))
         if not chunks:
-            return
+            return None
         audio = np.frombuffer(
             b"".join(c.audio_int16_bytes for c in chunks), dtype=np.int16,
         )
         sd.play(audio, samplerate=chunks[0].sample_rate)
         if mic is None or not BARGE_GAIN:
             sd.wait()
-            return
+            return None
 
         # Сбросить звук, записанный ДО начала речи (тишина, пока думал агент):
         # иначе эталон эха меряется по тишине, собственный голос из колонок
-        # оказывается «громче эха в 3 раза» — и ассистент перебивает сам себя.
+        # оказывается «громче эха» — и ассистент перебивает сам себя.
         mic.flush()
         skip_blocks = int(0.2 * SAMPLE_RATE / BLOCK)  # задержка до колонок/микрофона
         baseline_blocks = int(0.4 * SAMPLE_RATE / BLOCK)  # столько меряем своё эхо
         need_loud = max(1, int(0.25 * SAMPLE_RATE / BLOCK))  # ~0.25 с речи поверх
+        recent_cap = int(1.5 * SAMPLE_RATE / BLOCK)  # окно звука для распознавания
         echo_levels: list[float] = []
+        recent: list = []
         seen = 0
         loud_streak = 0
+        ignore_until = 0  # пауза после ложного срабатывания (чужой разговор)
         stream = sd.get_stream()
-        while stream.active:
-            block = mic.get_block(timeout=0.1)
-            if block is None:
-                continue
-            seen += 1
-            if seen <= skip_blocks:
-                continue
-            rms = float(np.sqrt(np.mean(block**2)))
-            if len(echo_levels) < baseline_blocks:
-                echo_levels.append(rms)
-                continue
-            baseline = max(sum(echo_levels) / len(echo_levels), VAD_ABS_MIN)
-            loud_streak = loud_streak + 1 if rms > baseline * BARGE_GAIN else 0
-            if loud_streak >= need_loud:
-                sd.stop()  # пользователь перебил — замолкаем
-                break
-        mic.flush()
+        try:
+            while stream.active:
+                block = mic.get_block(timeout=0.1)
+                if block is None:
+                    continue
+                seen += 1
+                if seen <= skip_blocks:
+                    continue
+                rms = float(np.sqrt(np.mean(block**2)))
+                if len(echo_levels) < baseline_blocks:
+                    echo_levels.append(rms)
+                    continue
+                recent.append(block)
+                if len(recent) > recent_cap:
+                    recent.pop(0)
+                if seen < ignore_until:
+                    continue
+                baseline = max(sum(echo_levels) / len(echo_levels), VAD_ABS_MIN)
+                loud_streak = loud_streak + 1 if rms > baseline * BARGE_GAIN else 0
+                if loud_streak < need_loud:
+                    continue
+
+                # Кто-то громко заговорил поверх. Дослушиваем ~1 с и проверяем, нам ли.
+                for _ in range(int(1.0 * SAMPLE_RATE / BLOCK)):
+                    if not stream.active:
+                        break
+                    extra = mic.get_block(timeout=0.1)
+                    if extra is not None:
+                        recent.append(extra)
+                if stt is None:
+                    sd.stop()
+                    return None
+                heard = stt.transcribe(np.concatenate(recent))
+                words = _normalize_words(heard)
+                if any(SHUTUP_COMMANDS.match(w) for w in words):
+                    sd.stop()
+                    print("   🤫")
+                    return None
+                if any(_is_name(w) for w in words):
+                    sd.stop()
+                    return heard
+                # Не нам (чужой разговор) — говорим дальше, секунду не дёргаемся.
+                loud_streak = 0
+                recent = []
+                ignore_until = seen + int(1.0 * SAMPLE_RATE / BLOCK)
+        finally:
+            mic.flush()
+        return None
 
 
 def _sanitize_for_tts(text: str) -> str:
@@ -442,45 +478,48 @@ def main() -> None:
     print(f"🎙 Микрофон: {_mic_name(mic_device)}")
     print(f"Имя: {names}. Скажи «{ASSISTANT_NAMES[0].capitalize()}, включи …». Ctrl+C — выход.\n")
 
-    follow_until = 0.0
+    follow = {"until": 0.0}
     with MicSegmenter(mic_device) as mic:
-        for audio in mic.utterances():
-            t0 = time.monotonic()
-            text = stt.transcribe(audio)
-            stt_ms = (time.monotonic() - t0) * 1000
-            if not text or looks_like_junk(text):
-                continue
 
+        def speak(phrase: str) -> None:
+            """Озвучить и обработать то, чем пользователь перебил (имя+команда)."""
+            heard = speaker.say(phrase, mic, stt)
+            if heard:
+                print(f"🎤 (перебил) «{heard}»")
+                process(heard)
+
+        def process(text: str, stt_ms: float | None = None) -> None:
+            timing = f"  [stt {stt_ms:.0f}ms]" if stt_ms is not None else ""
             command = extract_command(text)
             if command is None:
                 words = _normalize_words(text)
                 normalized = " ".join(words)
-                if time.monotonic() < follow_until:
+                if time.monotonic() < follow["until"]:
                     command = normalized
-                    follow_until = 0.0
+                    follow["until"] = 0.0
                 elif BARE_COMMANDS.match(normalized) or SHUTUP_COMMANDS.match(normalized):
                     command = normalized  # управляющая команда — можно без имени
                 else:
                     command = control_in_context(words)  # «…приложением, продолжай»
             if command is None:
-                print(f"   · мимо: «{text}»  [stt {stt_ms:.0f}ms]")
-                continue
+                print(f"   · мимо: «{text}»{timing}")
+                return
             if SHUTUP_COMMANDS.match(command):
                 # «замолчи»/«заткнись» — оборвать речь и молчать (музыку не трогаем).
                 print("   🤫")
-                follow_until = 0.0
-                continue
+                follow["until"] = 0.0
+                return
             if not command:
                 print(f"🎤 {text} — слушаю…")
                 if speaker:
-                    speaker.say("Слушаю", mic)
+                    speak("Слушаю")
                 else:
                     _beep()
-                follow_until = time.monotonic() + FOLLOWUP_SEC
-                continue
+                follow["until"] = time.monotonic() + FOLLOWUP_SEC
+                return
 
-            follow_until = 0.0
-            print(f"🎤 «{text}»  [stt {stt_ms:.0f}ms]")
+            follow["until"] = 0.0
+            print(f"🎤 «{text}»{timing}")
             t0 = time.monotonic()
             try:
                 answer = agent.handle(command)
@@ -491,7 +530,15 @@ def main() -> None:
             if answer:
                 print(f"   {answer}   [{time.monotonic() - t0:.1f}s]")
                 if speaker:
-                    speaker.say(answer, mic)  # с barge-in: можно перебить голосом
+                    speak(answer)
+
+        for audio in mic.utterances():
+            t0 = time.monotonic()
+            text = stt.transcribe(audio)
+            stt_ms = (time.monotonic() - t0) * 1000
+            if not text or looks_like_junk(text):
+                continue
+            process(text, stt_ms)
 
 
 if __name__ == "__main__":

@@ -38,11 +38,14 @@ ASSISTANT_NAMES = [
     if n.strip()
 ]
 MIC_DEVICE = os.environ.get("MIC_DEVICE")  # индекс или подстрока имени; пусто = дефолтный
+# Голос piper для озвучки ответов; пустая строка = TTS выключен.
+PIPER_VOICE = os.environ.get("PIPER_VOICE", "ru_RU-irina-medium")
+VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
 
 SAMPLE_RATE = 16000  # частота, которую ест whisper
 BLOCK = 512  # 32 мс на блок
 PRE_ROLL_SEC = 0.4  # хвост до срабатывания VAD, чтобы не резать первый слог
-SILENCE_END_SEC = 0.8  # столько тишины закрывает фразу
+SILENCE_END_SEC = 1.1  # столько тишины закрывает фразу (меньше — режет команды на полуслове)
 MAX_UTTER_SEC = 12.0
 MIN_UTTER_SEC = 0.4
 VAD_GAIN = 3.0  # речь = громче адаптивного шумового пола во столько раз
@@ -137,6 +140,14 @@ class MicSegmenter:
         self._stream.stop()
         self._stream.close()
 
+    def flush(self) -> None:
+        """Выбросить накопленное аудио (например, собственную озвучку из колонок)."""
+        try:
+            while True:
+                self._queue.get_nowait()
+        except queue.Empty:
+            pass
+
     def utterances(self):
         np = self._np
         pre_roll: list = []
@@ -226,20 +237,67 @@ class Transcriber:
         list(segments)
 
     def transcribe(self, audio) -> str:
+        # Без initial_prompt: whisper на шуме/музыке «эхом» дописывал текст
+        # подсказки, и ассистент сам себе командовал «Игорь, включи музыку»
+        # (подтверждено вживую 2026-08-01). Вместо подсказки — фильтр по
+        # уверенности: галлюцинации приходят с низким avg_logprob.
         segments, _ = self.model.transcribe(
             audio,
             language="ru",
             beam_size=WHISPER_BEAM,
             vad_filter=True,
             condition_on_previous_text=False,
-            # Подсказка смещает распознавание к имени ассистента и командам.
-            initial_prompt=(
-                f"Команды голосовому ассистенту. {ASSISTANT_NAMES[0].capitalize()}, "
-                "включи музыку. Поставь следующий трек. Пауза. Стоп. Громче. "
-                "Включи избранное. Что сейчас играет?"
-            ),
         )
-        return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.7).strip()
+        return " ".join(
+            s.text.strip() for s in segments
+            if s.no_speech_prob < 0.7 and s.avg_logprob > -1.2
+        ).strip()
+
+
+# --- TTS: озвучка ответов через piper ---------------------------------------
+
+class Speaker:
+    """piper (piper-tts / piper1-gpl) с голосом PIPER_VOICE.
+
+    Модель голоса (~60 МБ) скачивается в voices/ при первом запуске.
+    """
+
+    def __init__(self):
+        import subprocess
+
+        from piper import PiperVoice
+
+        model_path = os.path.join(VOICES_DIR, f"{PIPER_VOICE}.onnx")
+        if not os.path.exists(model_path):
+            os.makedirs(VOICES_DIR, exist_ok=True)
+            print(f"… скачиваю голос {PIPER_VOICE}", flush=True)
+            subprocess.run(
+                [sys.executable, "-m", "piper.download_voices", PIPER_VOICE],
+                cwd=VOICES_DIR, check=True,
+            )
+        self.voice = PiperVoice.load(model_path)
+
+    def say(self, text: str) -> None:
+        import numpy as np
+        import sounddevice as sd
+
+        text = _sanitize_for_tts(text)
+        if not text:
+            return
+        chunks = list(self.voice.synthesize(text))
+        if not chunks:
+            return
+        audio = np.frombuffer(
+            b"".join(c.audio_int16_bytes for c in chunks), dtype=np.int16,
+        )
+        sd.play(audio, samplerate=chunks[0].sample_rate, blocking=True)
+
+
+def _sanitize_for_tts(text: str) -> str:
+    """Убираем символы, которые piper прочитает вслух как мусор (▶, кавычки-ёлочки ок)."""
+    text = re.sub(r"[▶⏸⏹🎤·]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 # --- главный цикл -----------------------------------------------------------
@@ -300,6 +358,16 @@ def main() -> None:
     started = time.monotonic()
     stt = Transcriber()
     print(f"✔ Whisper {WHISPER_MODEL} на {stt.device} за {time.monotonic() - started:.1f}s")
+
+    speaker = None
+    if PIPER_VOICE:
+        try:
+            speaker = Speaker()
+            print(f"✔ Голос: {PIPER_VOICE}")
+        except Exception as error:
+            print(f"   (TTS выключен: {str(error).splitlines()[0]}")
+            print("    для озвучки: python -m pip install piper-tts)")
+
     names = ", ".join(n.capitalize() for n in ASSISTANT_NAMES)
     mic_device = _resolve_mic()
     print(f"🎙 Микрофон: {_mic_name(mic_device)}")
@@ -322,8 +390,12 @@ def main() -> None:
                 print(f"   · мимо: «{text}»  [stt {stt_ms:.0f}ms]")
                 continue
             if not command:
-                _beep()
                 print(f"🎤 {text} — слушаю…")
+                if speaker:
+                    speaker.say("Слушаю")
+                    mic.flush()  # не слушать собственный голос из колонок
+                else:
+                    _beep()
                 follow_until = time.monotonic() + FOLLOWUP_SEC
                 continue
 
@@ -338,6 +410,9 @@ def main() -> None:
                 answer = f"Ошибка: {error}"
             if answer:
                 print(f"   {answer}   [{time.monotonic() - t0:.1f}s]")
+                if speaker:
+                    speaker.say(answer)
+                    mic.flush()  # не слушать собственный голос из колонок
 
 
 if __name__ == "__main__":

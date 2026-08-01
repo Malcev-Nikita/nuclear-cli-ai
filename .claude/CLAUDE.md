@@ -102,6 +102,11 @@ uv run --python 3.12 --with requests python assistant.py
 - **Данные Nuclear на диске** (Windows): `%APPDATA%\com.nuclearplayer\` —
   `queue.json`, `favorites.json`, `settings.json`, `playlists/`, `plugins/`,
   `active-providers.json`. Процесс называется `nuclear-music-player`.
+- **initial_prompt у whisper — нельзя**: на шуме/музыке whisper «эхом» дописывает
+  текст подсказки; с «Игорь, включи музыку» в подсказке ассистент сам себе
+  включал музыку (подтверждено вживую 2026-08-01). Вместо подсказки — фильтр
+  галлюцинаций в `Transcriber.transcribe`: `no_speech_prob < 0.7` и
+  `avg_logprob > -1.2`.
 - **faster-whisper на GPU (Windows)**: `WhisperModel(device="cuda")` создаётся
   успешно, а падает только первый encode — «Library cublas64_12.dll is not
   found». Лечение: pip-пакеты `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (уже в
@@ -134,7 +139,12 @@ uv run --python 3.12 --with requests python assistant.py
   живой прогон 2026-08-01 прошёл: cuda работает (после nvidia-cublas/cudnn
   pip-пакетов), wake-имя ловится, роутер и LLM отвечают. `small` путал
   сленг/имена артистов → дефолт теперь `large-v3-turbo`, beam 5.
-  Дальше в этапе 2 — TTS `piper`.
+  TTS ✅ собран: `piper-tts` (piper1-gpl), голос `ru_RU-irina-medium`
+  (выбран пользователем), скачивается в `voices/` через
+  `python -m piper.download_voices`; API: `PiperVoice.load(...).synthesize()`
+  → чанки с `audio_int16_bytes`/`sample_rate`, играем sounddevice. После
+  каждой озвучки `mic.flush()` — иначе ассистент слышит сам себя. Ждёт
+  живого прогона (риск: wheels piper-tts под Python 3.14 — тогда `py -3.12`).
 - Этап 3: демон с автозапуском; вариант Pi-сателлита. Для Pi текущий
   wake-подход (whisper на всё подряд) дорог — вернуться к openWakeWord
   (тренировка кастомного имени) или whisper tiny только как детектор имени.

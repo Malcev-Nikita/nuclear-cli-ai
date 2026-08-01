@@ -302,6 +302,22 @@ class Nuclear:
         self.replace_queue_and_play(tracks)
         return f"Включаю избранное: {len(tracks)} треков"
 
+    def seek_by(self, delta_seconds: int) -> str:
+        state = self.mcp.call("Playback.getState") or {}
+        if not state.get("duration") and state.get("status") not in ("playing", "paused"):
+            return "Сейчас ничего не играет"
+        position = max(0.0, float(state.get("seek") or 0) + delta_seconds)
+        duration = float(state.get("duration") or 0)
+        if duration:
+            position = min(position, max(0.0, duration - 1))
+        self.mcp.call("Playback.seekTo", {"seconds": position})
+        direction = "вперёд" if delta_seconds >= 0 else "назад"
+        return f"Перемотал {direction} на {_spoken_duration(abs(delta_seconds))}"
+
+    def seek_to_start(self) -> str:
+        self.mcp.call("Playback.seekTo", {"seconds": 0})
+        return "С начала"
+
     def favorite_current(self) -> str:
         item = self.mcp.call("Queue.getCurrentItem")
         if not item or not item.get("track"):
@@ -611,6 +627,33 @@ def _fmt_track(track: dict) -> str:
     return f"{artists} — {title}" if artists else title
 
 
+def _spoken_duration(seconds: int) -> str:
+    if seconds % 60 == 0 and seconds >= 60:
+        minutes = seconds // 60
+        if minutes == 1:
+            return "минуту"
+        return f"{minutes} {_plural(minutes, 'минуту', 'минуты', 'минут')}"
+    return f"{seconds} {_plural(seconds, 'секунду', 'секунды', 'секунд')}"
+
+
+def _seek_command(player: Nuclear, verb: str, rest: str) -> str:
+    """«перемотай на 30 секунд вперёд» / «отмотай минуту» / «перемотай в начало»."""
+    if re.search(r"начал|сначала|заново", rest):
+        return player.seek_to_start()
+    sign = -1 if verb.startswith("отмот") or re.search(r"назад|обратно", rest) else 1
+    match = re.search(r"(\d+)\s*(секунд\w*|минут\w*|час\w*)?", rest)
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2) or "секунд"
+        factor = 3600 if unit.startswith("час") else 60 if unit.startswith("минут") else 1
+        return player.seek_by(sign * amount * factor)
+    if "полминуты" in rest:
+        return player.seek_by(sign * 30)
+    if re.search(r"минут", rest):
+        return player.seek_by(sign * 60)  # «на минуту»
+    return player.seek_by(sign * 30)  # «перемотай вперёд/назад» без числа
+
+
 def _fmt_time(seconds: float) -> str:
     seconds = int(seconds)
     return f"{seconds // 60}:{seconds % 60:02d}"
@@ -634,6 +677,9 @@ def build_router(player: Nuclear) -> list[tuple[re.Pattern, callable]]:
         (r"^(?:включ\w+|поставь|играй|запусти)\s+музыку$", lambda m: player.resume()),
         (r"^(дальше|следующ\w*|скип|пропусти|next|skip)$", lambda m: player.next_track()),
         (r"^(назад|предыдущ\w*|prev|back)$", lambda m: player.previous_track()),
+        (r"^(перемотай|промотай|отмотай)\s*(.*)$",
+         lambda m: _seek_command(player, m.group(1), m.group(2))),
+        (r"^(?:с начала|сначала|заново)$", lambda m: player.seek_to_start()),
         (r"^(громче|погромче)$", lambda m: player.change_volume(+10)),
         (r"^(тише|потише)$", lambda m: player.change_volume(-10)),
         (r"^громкость\s+(\d{1,3})", volume_cmd),
@@ -723,6 +769,8 @@ def build_llm_tools() -> list[dict]:
              {"city": {"type": "string", "description": "Город, если назван; иначе пустая строка"}}),
         tool("web_search", "Найти в интернете ответ на вопрос о фактах, людях, событиях, новостях",
              {"query": {"type": "string", "description": "Поисковый запрос"}}, ["query"]),
+        tool("seek_by", "Перемотать текущий трек на N секунд (отрицательное N — назад)",
+             {"seconds": {"type": "integer", "description": "Например 30 или -30"}}, ["seconds"]),
         tool("play_youtube", "Включить видео/ролик/микс/подкаст с обычного YouTube "
                              "(когда просят именно ютуб или видео, а не песню)",
              {"query": query}, ["query"]),
@@ -751,6 +799,7 @@ class Agent:
             "set_volume": lambda a: player.set_volume(int(a["level"])),
             "get_weather": lambda a: get_weather(a.get("city") or ""),
             "web_search": lambda a: self.answer_from_web(a["query"]),
+            "seek_by": lambda a: player.seek_by(int(a["seconds"])),
             "play_youtube": lambda a: player.play_youtube(a["query"]),
             "get_time": lambda a: get_time(),
             "get_date": lambda a: get_date(),

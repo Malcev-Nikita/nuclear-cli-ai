@@ -46,8 +46,9 @@ def test_parse_period_dates():
     # «года» в дате не должно проваливаться в ветку «за год»
     assert parse_period("за 26 июня 2025 года", TODAY)[0] == date(2025, 6, 26)
     assert parse_period("за 5 мая", TODAY)[0] == date(2026, 5, 5)
-    assert parse_period("31 февраля", TODAY) is None
-    assert parse_period("тарабарщина", TODAY) is None
+    assert parse_period("31 февраля", TODAY) is None  # явная дата, но кривая
+    # период не назван («сколько я отработал») — по умолчанию сегодня
+    assert parse_period("сколько я отработал", TODAY) == (TODAY, TODAY, "сегодня")
 
 
 def test_spoken_work():

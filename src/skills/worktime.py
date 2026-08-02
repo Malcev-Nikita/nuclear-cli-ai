@@ -53,11 +53,11 @@ def parse_period(text: str, today: date | None = None):
         return today - timedelta(days=today.weekday()), today, "за неделю"
     if "месяц" in t:
         return today.replace(day=1), today, "за месяц"
-    if "сегодня" in t or not t.strip():  # раньше «год»: в «сегодня» есть «год»
+    if "сегодня" in t:  # раньше «год»: в «сегодня» есть подстрока «год»
         return today, today, "сегодня"
     if "год" in t:
         return date(today.year, 1, 1), today, "за год"
-    return None
+    return today, today, "сегодня"  # период не назван — значит, за сегодня
 
 
 class WorktimeSkill(Skill):

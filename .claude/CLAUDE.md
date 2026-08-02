@@ -30,7 +30,7 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 
 - `main.py` — точка входа и СБОРКА (сервисы → навыки → агент; порядок навыков =
   приоритет правил роутера: playback, favorites, youtube, music, weather,
-  clock, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`,
+  clock, notes, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`,
   `--meter` (живой уровень RMS vs порог VAD — тюнинг vad_gain/vad_abs_min).
 - `src/core/` — ядро: `wake.py` (WakeMatcher: имя/bare/shutup/контекст,
   looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
@@ -40,7 +40,9 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
   strip_think/parse_text_tool_call), `weather.py`, `websearch.py`, `youtube.py`.
 - `src/skills/` — навыки (Skill: rules() + tools(), см. base.py; Tool.query_arg
   нужен агенту для починки вырожденных ответов): playback, favorites, music
-  (транслит плейлистов, ютуб-фолбэк), youtube, weather, clock, search.
+  (транслит плейлистов, ютуб-фолбэк), youtube, weather, clock, notes
+  (файлы в NOTES_DIR, деф. public/notepad/, в .gitignore; имя файла =
+  дата-время с мкс + слаг -> сортировка по имени хронологична), search.
 - `src/audio/` — mic.py (MicSegmenter, анти-лаг), stt.py (Transcriber, CUDA),
   tts.py (Speaker, умный barge-in).
 - `assistant.py`/`voice.py` удалены (были шимами; запуск только через main.py).

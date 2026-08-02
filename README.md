@@ -48,6 +48,7 @@ python main.py --meter             # уровень микрофона прот�
 | `какая погода` / `погода в казани` | без LLM → Open-Meteo (интернет, без API-ключа) |
 | `найди/загугли Х` или вопрос о фактах | поиск DuckDuckGo → краткий пересказ моделью |
 | `сколько времени` / `какое сегодня число` | без LLM, мгновенно, локальные часы |
+| `запиши/запомни Х`, `прочитай заметки` | заметка в файл `public/notepad/`; `удали последнюю заметку` |
 | `включи с ютуба Х` / `включи видос Х` | обычный YouTube (видосы/миксы/подкасты), звук в Nuclear |
 
 ## Конфиг
@@ -87,7 +88,7 @@ src/core/         # ядро: wake-логика, агент, тексты — н
 src/services/     # адаптеры: Nuclear MCP, Ollama, Open-Meteo, DDG, YouTube
 src/audio/        # микрофон+VAD, whisper, piper (barge-in)
 src/skills/       # навыки: playback, music, favorites, youtube, weather,
-                  #         clock, search — правила роутера + инструменты LLM
+                  #         clock, notes, search — правила роутера + инструменты LLM
 tests/            # pytest: uv run --with requests --with pytest -m pytest tests
 ```
 

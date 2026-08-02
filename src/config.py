@@ -106,6 +106,11 @@ PIPER_VOICE = _get("tts", "voice", "PIPER_VOICE")
 TTS_SPEED = float(_get("tts", "speed", "TTS_SPEED", default=1.25))
 VOICES_DIR = os.path.join(_ROOT, "voices")
 
+# --- заметки ----------------------------------------------------------------
+
+_notes_dir = _get("notes", "dir", "NOTES_DIR", default="public/notepad")
+NOTES_DIR = _notes_dir if os.path.isabs(_notes_dir) else os.path.join(_ROOT, _notes_dir)
+
 # --- интернет-инструменты ---------------------------------------------------
 
 WEATHER_CITY = _get("internet", "weather_city", "WEATHER_CITY", default="")

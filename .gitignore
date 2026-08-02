@@ -4,3 +4,4 @@ __pycache__/
 .claude/claude-code-chat-images/
 voices/
 config.local.toml
+public/notepad/

@@ -25,6 +25,7 @@ from src.services.youtube import YoutubeSearch
 from src.skills.clock import ClockSkill
 from src.skills.favorites import FavoritesSkill
 from src.skills.music import MusicSkill
+from src.skills.notes import NotesSkill
 from src.skills.playback import PlaybackSkill
 from src.skills.search import SearchSkill
 from src.skills.weather import WeatherSkill
@@ -44,6 +45,7 @@ def build() -> tuple[McpClient, OllamaBrain, Agent]:
         MusicSkill(player, youtube),
         WeatherSkill(OpenMeteoWeather(config.WEATHER_CITY)),
         ClockSkill(),
+        NotesSkill(),
         SearchSkill(DuckDuckGo(), brain),
     ]
     return mcp, brain, Agent(skills, brain)

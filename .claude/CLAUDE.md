@@ -30,7 +30,8 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 
 - `main.py` — точка входа и СБОРКА (сервисы → навыки → агент; порядок навыков =
   приоритет правил роутера: playback, favorites, youtube, music, weather,
-  clock, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`.
+  clock, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`,
+  `--meter` (живой уровень RMS vs порог VAD — тюнинг vad_gain/vad_abs_min).
 - `src/core/` — ядро: `wake.py` (WakeMatcher: имя/bare/shutup/контекст,
   looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
   SYSTEM_PROMPT), `texts.py` (plural/fmt_track/fmt_time/spoken_duration).

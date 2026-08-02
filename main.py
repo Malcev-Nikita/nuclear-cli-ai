@@ -4,6 +4,7 @@
 Запуск:  python main.py            голосовой режим
          python main.py --text     текстовый REPL (без микрофона и озвучки)
          python main.py --devices  список микрофонов
+         python main.py --meter    уровень микрофона против порога VAD
 """
 
 from __future__ import annotations
@@ -197,6 +198,15 @@ def main(argv: list[str] | None = None) -> None:
     if "--devices" in argv:
         from src.audio.mic import list_devices
         list_devices()
+        return
+    if "--meter" in argv:
+        from src.audio.mic import meter, mic_name, resolve_mic
+        device = resolve_mic(config.MIC_DEVICE)
+        print(f"🎙 Микрофон: {mic_name(device)}. Ctrl+C — выход.")
+        try:
+            meter(device)
+        except KeyboardInterrupt:
+            print()
         return
     try:
         if "--text" in argv:

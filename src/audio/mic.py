@@ -122,6 +122,38 @@ class MicSegmenter:
                     yield audio
 
 
+def meter(device) -> None:
+    """Живой уровень микрофона против порога VAD — подбор vad_gain/vad_abs_min."""
+    import numpy as np
+
+    print("Говорите с обычного места — на каждой фразе должна загораться метка РЕЧЬ.")
+    print("Музыка из колонок поднимает пол, а с ним и порог: проверьте и под музыку.\n")
+    with MicSegmenter(device) as mic:
+        noise = VAD_ABS_MIN
+        peak, blocks = 0.0, 0
+        width, full = 40, 0.2  # full — RMS «полной» полосы (громкая речь в упор)
+        while True:
+            block = mic.get_block(timeout=1.0)
+            if block is None:
+                continue
+            rms = float(np.sqrt(np.mean(block**2)))
+            threshold = max(VAD_ABS_MIN, noise * VAD_GAIN)
+            if rms <= threshold:
+                noise = 0.95 * noise + 0.05 * rms
+            peak = max(peak, rms)
+            blocks += 1
+            if blocks * BLOCK / SAMPLE_RATE < 0.3:  # обновляем ~3 раза в сек
+                continue
+            filled = min(width, int((peak / full) ** 0.5 * width))
+            mark = min(width - 1, int((threshold / full) ** 0.5 * width))
+            bar = "".join(
+                "│" if i == mark else ("█" if i < filled else "·") for i in range(width)
+            )
+            state = "РЕЧЬ" if peak > threshold else "    "
+            print(f"\r{bar} {state}  уровень {peak:.4f}  порог {threshold:.4f}", end="", flush=True)
+            peak, blocks = 0.0, 0
+
+
 def list_devices() -> None:
     import sounddevice as sd
 

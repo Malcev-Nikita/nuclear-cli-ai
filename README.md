@@ -24,6 +24,7 @@ python -m pip install -r requirements.txt
 python main.py                     # голосовой режим
 python main.py --text              # текстовый REPL (без микрофона и озвучки)
 python main.py --devices           # список микрофонов
+python main.py --meter             # уровень микрофона против порога VAD (тюнинг)
 ```
 
 Голосовой режим: скажите **«Мага, включи нирвану»** — фразы без имени

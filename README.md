@@ -2,7 +2,7 @@
 
 Голосовой ассистент для [Nuclear](https://github.com/nukeop/nuclear) — аналог
 «Яндекс станции» на своём ПК. Текущий этап: **2 — голосовые команды**
-(этап 1, текстовый, работает: `assistant.py`).
+(текстовый режим: `python main.py --text`).
 
 ```
 голос → VAD → faster-whisper (STT) → «фраза начинается с "Игорь"?»
@@ -20,7 +20,7 @@
 
 ```powershell
 cd nuclear-cli-ai
-python -m pip install -r requirements-voice.txt
+python -m pip install -r requirements.txt
 python main.py                     # голосовой режим
 python main.py --text              # текстовый REPL (без микрофона и озвучки)
 python main.py --devices           # список микрофонов
@@ -67,13 +67,13 @@ python main.py --devices           # список микрофонов
 | `ASSISTANT_NAMES` | `игорь` | имена через запятую: `игорь,гарик,ассистент` |
 | `WHISPER_MODEL` | `large-v3-turbo` | на слабой машине: `small` (хуже имена артистов) |
 | `WHISPER_DEVICE` | `auto` | `cuda` / `cpu` (auto пробует cuda, падает на cpu) |
-| `MIC_DEVICE` | системный | индекс или часть имени из `voice.py --devices` |
+| `MIC_DEVICE` | системный | индекс или часть имени из `main.py --devices` |
 | `PIPER_VOICE` | `ru_RU-irina-medium` | голос озвучки ([примеры](https://rhasspy.github.io/piper-samples/)); `""` = без озвучки |
 | `TTS_SPEED` | `1.5` | темп речи (1.0 = обычный) |
 | `WEATHER_CITY` | по IP | город для «какая погода» без уточнения |
 
 ```powershell
-$env:OLLAMA_MODEL = "qwen3:1.7b"; python assistant.py
+$env:OLLAMA_MODEL = "qwen3:1.7b"; python main.py
 ```
 
 ## Структура
@@ -81,7 +81,7 @@ $env:OLLAMA_MODEL = "qwen3:1.7b"; python assistant.py
 ```
 main.py           # точка входа (сборка сервисов, навыков, агента; оба режима)
 config.toml       # настройки; config.local.toml — личные (в .gitignore)
-config.py         # загрузчик настроек
+src/config.py     # загрузчик настроек
 src/core/         # ядро: wake-логика, агент, тексты — не знает о внешнем мире
 src/services/     # адаптеры: Nuclear MCP, Ollama, Open-Meteo, DDG, YouTube
 src/audio/        # микрофон+VAD, whisper, piper (barge-in)

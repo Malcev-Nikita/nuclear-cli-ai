@@ -1,6 +1,6 @@
 """Мелкие чистые функции: тексты, транслит, длительности, конфиг."""
 
-import config
+from src import config
 from src.core.texts import fmt_track, plural, spoken_duration
 from src.services.weather import spoken_temp
 from src.services.youtube import duration_ms

@@ -13,7 +13,7 @@ import time
 
 import requests
 
-import config
+from src import config
 from src.core.agent import Agent
 from src.core.wake import WakeMatcher, looks_like_junk, normalize_words
 from src.services.nuclear import McpClient, NuclearError, NuclearPlayer

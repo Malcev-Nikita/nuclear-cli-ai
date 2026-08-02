@@ -8,9 +8,9 @@
 Цепочка: команда → regex-роутер → (если не распознано) LLM через Ollama с узкими
 инструментами → MCP-сервер Nuclear → плеер.
 
-Этап 1 (`assistant.py`, текстовые команды) **работает вживую у пользователя**
-(подтверждено 2026-08-01). Текущий этап — **2: голос** (`voice.py`, собран
-2026-08-01, ждёт живого прогона; TTS ещё не делали).
+Этап 1 (текстовые команды, `python main.py --text`) **работает вживую у
+пользователя** (2026-08-01). Текущий этап — **2: голос** (`python main.py`,
+STT+TTS работают вживую с 2026-08-01/02).
 
 Связанный проект: `/home/claude/projects/nuclear-plugin-puer` — плагин для Nuclear
 (`puer-ytmusic` metadata / `puer-import` playlists / `puer-youtube` streaming).
@@ -42,14 +42,14 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
   (транслит плейлистов, ютуб-фолбэк), youtube, weather, clock, search.
 - `src/audio/` — mic.py (MicSegmenter, анти-лаг), stt.py (Transcriber, CUDA),
   tts.py (Speaker, умный barge-in).
-- `assistant.py`/`voice.py` — шимы-переадресации на main.py (не удалять сразу).
+- `assistant.py`/`voice.py` удалены (были шимами; запуск только через main.py).
 - Новая способность = класс в `src/skills/` + строка в сборке `main.py`.
 
 ## Запуск и проверка
 
 ```bash
 # у пользователя (Windows):
-python -m pip install -r requirements-voice.txt
+python -m pip install -r requirements.txt  # единый (voice-зависимости включены)
 python main.py            # голос;  --text — REPL;  --devices — микрофоны
 
 # тесты (и в песочнице; 43 шт., гонять после любых правок):
@@ -59,10 +59,11 @@ uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
 Настройки — в `config.toml` (только данные, с комментариями; по требованию
 пользователя — никакого кода в конфиге). Переопределения: `config.local.toml`
 (личное, в .gitignore, для шаринга проекта) → env-переменные (сильнее всех).
-`config.py` — загрузчик (tomllib, merge, `*` в списках слов → `\w+`), отдаёт
-константы под СТАРЫМИ именами (ASSISTANT_NAMES, BARE_COMMANDS-регулярка и
-т.д.) — код импортирует их как раньше. Новые настройки: ключ в config.toml +
-строка-константа в config.py.
+`src/config.py` — загрузчик (перенесён из корня 2026-08-02 по просьбе
+пользователя; tomllib, merge, `*` в списках слов → `\w+`; toml-файлы и voices/
+ищет в корне проекта), отдаёт константы под СТАРЫМИ именами (ASSISTANT_NAMES,
+BARE_COMMANDS-регулярка и т.д.), импорт — `from src.config import ...`.
+Новые настройки: ключ в config.toml + строка-константа в src/config.py.
 
 ## Архитектурные решения (не менять без причины)
 
@@ -71,8 +72,8 @@ uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
   ноль латентности. На Pi это большинство команд, и это главный способ сделать Pi
   реальным. Голое «включи Х» (тип неясен) — по-прежнему LLM.
 - **Прогрев Ollama** (`Agent.warmup_async`): POST /api/chat с пустыми `messages` в
-  фоновом потоке при старте — модель в памяти до первой команды. В voice.py идёт
-  параллельно с загрузкой whisper.
+  фоновом потоке при старте — модель в памяти до первой команды. В голосовом
+  режиме идёт параллельно с загрузкой whisper.
 - Шкала громкости определяется по `getVolume` один раз и кешируется
   (`Nuclear._volume_is_unit`) — «громче» = 2 MCP-вызова, а не 3.
 - **18 узких инструментов вместо сырых 4 мета-инструментов Nuclear MCP**
@@ -104,14 +105,14 @@ uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
   (`utterances()`): речи набралось ≥ `LONG_PHRASE_SEC` (1.5 с) → фраза
   закрывается по `SILENCE_END_LONG_SEC` (0.9 с), иначе по `SILENCE_END_SEC`
   (0.4 с) — «дальше»/«стоп» отвечают быстро, длинные команды не рвутся.
-- **Wake word без openWakeWord** (`voice.py`): под русское имя «Игорь» готовой
+- **Wake word без openWakeWord** (`src/core/wake.py`): под русское имя «Игорь» готовой
   модели нет, тренировать свою — отдельный проект. Вместо этого whisper
   распознаёт каждую фразу (энергетический VAD режет речь на фразы), а ассистент
   реагирует только если в фразе есть имя из `ASSISTANT_NAMES` — в любом месте,
   т.к. VAD склеивает предложения; команда = слова после имени (последнее
   вхождение с продолжением). Нечётко, Левенштейн ≤1 — ловит «Егорь»/«Игор»,
   побочно и падежи «Игоря». Короткие управляющие команды (`BARE_COMMANDS`,
-  config.py: стоп/пауза/дальше/громче/…) принимаются без имени: фраза целиком
+  config.toml: стоп/пауза/дальше/громче/…) принимаются без имени: фраза целиком
   ИЛИ первым/последним словом короткой фразы (`control_in_context`, лимит
   `CONTEXT_COMMAND_MAX_WORDS`=8 слов — «…этим приложением, продолжай»
   срабатывает, длинный монолог со словом «дальше» на конце нет). Список
@@ -170,8 +171,8 @@ uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
 - **faster-whisper на GPU (Windows)**: `WhisperModel(device="cuda")` создаётся
   успешно, а падает только первый encode — «Library cublas64_12.dll is not
   found». Лечение: pip-пакеты `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (уже в
-  requirements-voice.txt) + `os.add_dll_directory` на их bin (есть в voice.py,
-  `_add_cuda_dll_dirs`). Поэтому же в Transcriber есть warm-up при старте —
+  requirements.txt) + `os.add_dll_directory` на их bin (`_add_cuda_dll_dirs`
+  в src/audio/stt.py). Поэтому же в Transcriber есть warm-up при старте —
   чтобы фолбэк на cpu срабатывал сразу, а не на первой фразе.
 
 ## Тестовый стенд (без Nuclear и Ollama)
@@ -187,14 +188,14 @@ uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
 - **fake-ollama**: express, `GET /api/version` + `POST /api/chat`, маршрутизация по
   ключевым словам → `tool_calls` как у qwen3.
 
-Прогон: `printf 'команды\nq\n' | uv run --python 3.12 --with requests python assistant.py`.
+Прогон: `printf 'команды\nq\n' | uv run --python 3.12 --with requests python main.py --text`.
 Эталонный набор — 15 сценариев (артист/трек/альбом/плейлист локальный и YT/все
 команды роутера/не-музыкальный вопрос).
 
 ## План
 
 - Этап 1 ✅ работает вживую (2026-08-01).
-- Этап 2: голос. STT ✅ собран (`voice.py`: sounddevice → энергетический VAD →
+- Этап 2: голос. STT ✅ собран (`src/audio/`: sounddevice → энергетический VAD →
   faster-whisper → wake-имя → agent.handle). Ждёт живого прогона; риски:
   живой прогон 2026-08-01 прошёл: cuda работает (после nvidia-cublas/cudnn
   pip-пакетов), wake-имя ловится, роутер и LLM отвечают. `small` путал
@@ -219,7 +220,7 @@ uv run --python 3.12 --with requests --with pytest python -m pytest tests -q
   (из музыкального стоп-правила «замолчи» убран). Темп речи —
   `TTS_SPEED` (деф. 1.5; в piper это `SynthesisConfig(length_scale=1/скорость)`).
   Ждёт живого прогона (риск: wheels piper-tts под Python 3.14 — тогда `py -3.12`).
-- **Погода** (`get_weather` в assistant.py): Open-Meteo (быстрее и стабильнее
+- **Погода** (`src/services/weather.py` + `src/skills/weather.py`): Open-Meteo (быстрее и стабильнее
   wttr.in, ~0.3 с, без ключа): геокодер open-meteo (кеш на сессию, падежи
   «в казани» лечатся перебором окончаний) → forecast API, коды WMO → `_WMO_DESC`.
   Город из команды → `WEATHER_CITY` → по IP (ip-api.com). Фраза «под озвучку»:

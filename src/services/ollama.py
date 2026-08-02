@@ -8,7 +8,7 @@ import threading
 
 import requests
 
-from config import HTTP_TIMEOUT, OLLAMA_KEEP_ALIVE, OLLAMA_MODEL, OLLAMA_URL
+from src.config import HTTP_TIMEOUT, OLLAMA_KEEP_ALIVE, OLLAMA_MODEL, OLLAMA_URL
 
 
 def strip_think(text: str) -> str:

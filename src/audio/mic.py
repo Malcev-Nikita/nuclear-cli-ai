@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 
-from config import (
+from src.config import (
     BLOCK,
     LONG_PHRASE_SEC,
     MAX_LAG_SEC,

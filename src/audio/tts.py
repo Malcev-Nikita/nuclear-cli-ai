@@ -6,7 +6,7 @@ import os
 import re
 import sys
 
-from config import (
+from src.config import (
     BARGE_GAIN,
     BLOCK,
     PIPER_VOICE,

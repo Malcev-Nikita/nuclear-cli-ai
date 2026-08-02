@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from config import (
+from src.config import (
     ASSISTANT_NAMES,
     BARE_COMMANDS,
     CONTEXT_COMMAND_MAX_WORDS,

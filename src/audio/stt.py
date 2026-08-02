@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from config import SAMPLE_RATE, WHISPER_BEAM, WHISPER_DEVICE, WHISPER_MODEL
+from src.config import SAMPLE_RATE, WHISPER_BEAM, WHISPER_DEVICE, WHISPER_MODEL
 
 
 def _add_cuda_dll_dirs() -> None:

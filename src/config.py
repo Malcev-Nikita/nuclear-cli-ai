@@ -11,12 +11,13 @@ import os
 import re
 import tomllib
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
+# toml-файлы и voices/ живут в корне проекта (на уровень выше src/)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_toml(name: str) -> dict:
     try:
-        with open(os.path.join(_DIR, name), "rb") as f:
+        with open(os.path.join(_ROOT, name), "rb") as f:
             return tomllib.load(f)
     except FileNotFoundError:
         return {}
@@ -103,7 +104,7 @@ MAX_LAG_SEC = float(_get("microphone", "max_lag_sec", default=3.0))
 
 PIPER_VOICE = _get("tts", "voice", "PIPER_VOICE")
 TTS_SPEED = float(_get("tts", "speed", "TTS_SPEED", default=1.25))
-VOICES_DIR = os.path.join(_DIR, "voices")
+VOICES_DIR = os.path.join(_ROOT, "voices")
 
 # --- интернет-инструменты ---------------------------------------------------
 

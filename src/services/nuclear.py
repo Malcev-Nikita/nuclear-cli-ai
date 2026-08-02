@@ -10,7 +10,7 @@ import json
 
 import requests
 
-from config import HTTP_TIMEOUT, NUCLEAR_MCP_URL
+from src.config import HTTP_TIMEOUT, NUCLEAR_MCP_URL
 
 
 class NuclearError(Exception):

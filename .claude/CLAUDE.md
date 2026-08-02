@@ -30,12 +30,14 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 
 - `main.py` — точка входа и СБОРКА (сервисы → навыки → агент; порядок навыков =
   приоритет правил роутера: playback, favorites, youtube, music, weather,
-  clock, [worktime], notes, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`,
+  clock, [worktime], notes, search — менять осторожно; в [скобках] —
+  опциональные, включаются ключами в конфиге). Режимы: голос (деф.), `--text`, `--devices`,
   `--meter` (живой уровень RMS vs порог VAD — тюнинг vad_gain/vad_abs_min).
 - `src/core/` — ядро: `wake.py` (WakeMatcher: имя/bare/shutup/контекст,
   looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
   SYSTEM_PROMPT + ASSISTANT_LORE — лор из config.toml `[assistant] lore`,
-  влияет на болтовню и пересказ поиска), `texts.py`
+  влияет на болтовню и пересказ поиска; упоминания опциональных инструментов
+  добавляются, только если навык собран), `texts.py`
   (plural/fmt_track/fmt_time/spoken_duration).
 - `src/services/` — адаптеры, каждый со своими граблями: `nuclear.py`
   (McpClient + NuclearPlayer, БЕЗ фраз), `ollama.py` (OllamaBrain,
@@ -262,3 +264,17 @@ BARE_COMMANDS-регулярка и т.д.), импорт — `from src.config i
   (тренировка кастомного имени) или whisper tiny только как детектор имени.
 - Push-событий смены трека в MCP нет; если понадобятся — SSE `/api/events`
   HTTP API Nuclear (`integrations.jam`).
+- **Умный свет Smart Life (Tuya) — ОТЛОЖЕН до Raspberry Pi** (решение
+  пользователя 2026-08-02). Навык был написан (облачный путь, tinytuya.Cloud) и
+  откачен целиком — в git не попадал. Что выяснено живьём и стоит помнить:
+  ключи пользователя (Access ID/Secret) валидны, токен выдаётся; регион у Tuya
+  бывает только eu/us/cn/in (в конфиге были «ru»/«kz» — tinytuya молча уходит в
+  Китай, а тот режет по IP); реальный блокер — проект отвечает «No permission.
+  The data center is suspended»: IoT Core даётся на 1 месяц, дальше продление по
+  заявке (1-2 рабочих дня) или платно, постоянного бесплатного тарифа нет.
+  Поэтому решено делать ЛОКАЛЬНО по Wi-Fi на Pi: tinytuya local нужен
+  `local_key` (добывается через облако, пока триал жив — забрать заранее
+  `python -m tinytuya wizard`), и одна подсеть с лампами (лампы только 2.4 ГГц,
+  ПК на 5 ГГц — на типовом роутере это одна сеть, проверяется
+  `python -m tinytuya scan`). Ключи пользователя остались в его
+  config.local.toml, секция `[smartlife]` (кодом не читается).

@@ -46,6 +46,12 @@ def test_duration_ms():
     assert duration_ms(None) is None  # лайв-стрим
 
 
+def test_config_adaptive_silence():
+    # длинная фраза должна получать не меньший порог тишины, чем короткая
+    assert config.SILENCE_END_LONG_SEC >= config.SILENCE_END_SEC
+    assert config.LONG_PHRASE_SEC > 0
+
+
 def test_config_word_lists():
     assert config.BARE_COMMANDS.match("стоп")
     assert config.BARE_COMMANDS.match("следующий")  # «следующ*»

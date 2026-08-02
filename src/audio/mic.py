@@ -6,11 +6,13 @@ import queue
 
 from config import (
     BLOCK,
+    LONG_PHRASE_SEC,
     MAX_LAG_SEC,
     MAX_UTTER_SEC,
     MIN_UTTER_SEC,
     PRE_ROLL_SEC,
     SAMPLE_RATE,
+    SILENCE_END_LONG_SEC,
     SILENCE_END_SEC,
     VAD_ABS_MIN,
     VAD_GAIN,
@@ -68,7 +70,10 @@ class MicSegmenter:
         pre_roll_blocks = int(PRE_ROLL_SEC * SAMPLE_RATE / BLOCK)
         capture: list | None = None
         silent_blocks = 0
-        end_blocks = int(SILENCE_END_SEC * SAMPLE_RATE / BLOCK)
+        speech_blocks = 0
+        end_blocks_short = int(SILENCE_END_SEC * SAMPLE_RATE / BLOCK)
+        end_blocks_long = int(SILENCE_END_LONG_SEC * SAMPLE_RATE / BLOCK)
+        long_phrase_blocks = int(LONG_PHRASE_SEC * SAMPLE_RATE / BLOCK)
         max_blocks = int(MAX_UTTER_SEC * SAMPLE_RATE / BLOCK)
         max_lag_blocks = int(MAX_LAG_SEC * SAMPLE_RATE / BLOCK)
 
@@ -89,6 +94,7 @@ class MicSegmenter:
                 if is_speech:
                     capture = pre_roll + [block]
                     silent_blocks = 0
+                    speech_blocks = 1
                 else:
                     self._noise = 0.95 * self._noise + 0.05 * rms
                     pre_roll.append(block)
@@ -100,7 +106,14 @@ class MicSegmenter:
             # Медленная адаптация и во время записи: иначе непрерывная музыка
             # держит VAD «в речи» вечно — ассистент глохнет и копит отставание.
             self._noise = 0.998 * self._noise + 0.002 * rms
-            silent_blocks = 0 if is_speech else silent_blocks + 1
+            if is_speech:
+                silent_blocks = 0
+                speech_blocks += 1
+            else:
+                silent_blocks += 1
+            # Длинная фраза → терпим паузу подольше: «включи какой-нибудь…
+            # ролик…» не режется на куски, а «дальше» закрывается быстро.
+            end_blocks = end_blocks_long if speech_blocks >= long_phrase_blocks else end_blocks_short
             if silent_blocks >= end_blocks or len(capture) >= max_blocks:
                 audio = np.concatenate(capture)
                 capture = None

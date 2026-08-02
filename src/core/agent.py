@@ -110,7 +110,20 @@ class Agent:
 
     def _degenerate_fallback(self, content: str, text: str) -> str | None:
         """qwen3:1.7b вместо вызова иногда отвечает голым именем инструмента
-        («play_track») или эхом самой команды. Чиним оба случая."""
+        («play_track»), именем с JSON-аргументами на следующей строке или эхом
+        самой команды. Чиним все три случая."""
+        # get_forecast\n{"city": "Астрахань", "when": "завтра"} (вживую 2026-08-02)
+        with_args = re.match(r"^\s*([a-z_]\w*)\s*[\r\n]+\s*(\{.*\})\s*$",
+                             content.strip(), re.DOTALL)
+        if with_args and with_args.group(1) in self.tool_impl:
+            try:
+                arguments = json.loads(with_args.group(2))
+            except json.JSONDecodeError:
+                arguments = {}
+            if isinstance(arguments, dict):
+                name = with_args.group(1)
+                self._remember(self._tool_owner.get(name))
+                return self.tool_impl[name](arguments)
         tool_name = content.strip().strip('«»"`.,! ').lower()
         subject = re.sub(r"^(?:включ\w+|поставь|запусти|сыграй)\s+", "",
                          text.strip(), flags=re.IGNORECASE)

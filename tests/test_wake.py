@@ -43,3 +43,13 @@ def test_barge_words():
     assert wake.has_shutup_word(normalize_words("да заткнись ты"))
     assert wake.has_name(normalize_words("и тут мага стоп"))
     assert not wake.has_name(normalize_words("мы просто разговариваем"))
+
+
+def test_is_follow_up():
+    """«А в Питере?» сразу после ответа — уточнение, а не чужой разговор."""
+    assert wake.is_follow_up(normalize_words("а в питере"))
+    assert wake.is_follow_up(normalize_words("и за позавчера"))
+    assert not wake.is_follow_up(normalize_words("а"))  # одно слово — не команда
+    assert not wake.is_follow_up(normalize_words("в питере"))  # без «а»
+    assert not wake.is_follow_up(normalize_words(
+        "а вот вчера мы с ребятами ходили в кино и там было весело"))

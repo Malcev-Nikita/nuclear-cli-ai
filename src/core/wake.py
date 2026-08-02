@@ -84,6 +84,17 @@ class WakeMatcher:
                 return candidate
         return None
 
+    def is_follow_up(self, words: list[str]) -> bool:
+        """«а в питере?» — уточнение к только что прозвучавшему ответу.
+
+        Принимается без имени, но лишь коротким и начатым с «а»/«и»: сразу
+        после ответа так спрашивают именно ассистента (вживую 2026-08-02
+        «А в Питере?» после погоды уходило в «мимо»).
+        """
+        if not self.context_max_words or not 1 < len(words) <= self.context_max_words:
+            return False
+        return words[0] in ("а", "и")
+
     def has_shutup_word(self, words: list[str]) -> bool:
         return any(self.shutup.match(w) for w in words)
 

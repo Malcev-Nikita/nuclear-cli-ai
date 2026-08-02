@@ -54,6 +54,18 @@ def test_echo_fallback():
     assert agent.handle("включи куплиново") == "Включаю с ютуба: Тестовый видос"
 
 
+def test_tool_name_with_json_args():
+    """qwen3 выдал имя инструмента, а аргументы — строкой ниже (вживую 2026-08-02)."""
+    brain = FakeBrain(content='set_volume\n{"level": 40}')
+    assert make_agent(brain).handle("сделай погромче на сорок") == "Громкость 40%"
+
+
+def test_tool_name_with_broken_json():
+    """Аргументы не разобрались — зовём инструмент пустым, а не падаем."""
+    brain = FakeBrain(content='pause\n{это не json}')
+    assert make_agent(brain).handle("пауза") == "Пауза"
+
+
 def test_chitchat_passthrough():
     agent = make_agent(FakeBrain(content="Я не люблю кальян."))
     assert agent.handle("ты любишь кальян?") == "Я не люблю кальян."

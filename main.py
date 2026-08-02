@@ -159,7 +159,8 @@ def run_voice() -> None:
     print(f"🎙 Микрофон: {mic_name(mic_device)}")
     print(f"Имя: {names}. Скажи «{wake.names[0].capitalize()}, включи …». Ctrl+C — выход.\n")
 
-    follow = {"until": 0.0}
+    # until — окно после голого «Мага!»; chat — окно уточнений после ответа
+    follow = {"until": 0.0, "chat": 0.0}
     with MicSegmenter(mic_device) as mic:
 
         def speak(phrase: str) -> None:
@@ -180,6 +181,8 @@ def run_voice() -> None:
                     follow["until"] = 0.0
                 elif wake.bare.match(normalized) or wake.shutup.match(normalized):
                     command = normalized  # управляющая команда — можно без имени
+                elif time.monotonic() < follow["chat"] and wake.is_follow_up(words):
+                    command = normalized  # «а в питере?» сразу после ответа
                 else:
                     command = wake.control_in_context(words)
             if command is None:
@@ -206,6 +209,8 @@ def run_voice() -> None:
                 print(f"   {answer}   [{time.monotonic() - started:.1f}s]")
                 if speaker:
                     speak(answer)
+            # окно, в котором «а в питере?» принимается без имени
+            follow["chat"] = time.monotonic() + config.FOLLOWUP_SEC
 
         def ring() -> None:
             """Сработавшие таймеры/будильники — озвучиваем в главном потоке."""

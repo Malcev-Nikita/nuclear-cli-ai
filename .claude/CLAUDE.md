@@ -34,7 +34,9 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
   `--meter` (живой уровень RMS vs порог VAD — тюнинг vad_gain/vad_abs_min).
 - `src/core/` — ядро: `wake.py` (WakeMatcher: имя/bare/shutup/контекст,
   looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
-  SYSTEM_PROMPT), `texts.py` (plural/fmt_track/fmt_time/spoken_duration).
+  SYSTEM_PROMPT + ASSISTANT_LORE — лор из config.toml `[assistant] lore`,
+  влияет на болтовню и пересказ поиска), `texts.py`
+  (plural/fmt_track/fmt_time/spoken_duration).
 - `src/services/` — адаптеры, каждый со своими граблями: `nuclear.py`
   (McpClient + NuclearPlayer, БЕЗ фраз), `ollama.py` (OllamaBrain,
   strip_think/parse_text_tool_call), `weather.py`, `websearch.py`, `youtube.py`.

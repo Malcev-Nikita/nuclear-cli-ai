@@ -73,6 +73,7 @@ ASSISTANT_NAMES = [
     n.strip().lower().replace("ё", "е") for n in _names_raw if n.strip()
 ]
 
+ASSISTANT_LORE = str(_get("assistant", "lore", "ASSISTANT_LORE", default="") or "").strip()
 FOLLOWUP_SEC = float(_get("assistant", "followup_sec", default=8.0))
 BARE_COMMANDS = _words_regex(_get("assistant", "bare_commands", default=[]))
 SHUTUP_COMMANDS = _words_regex(_get("assistant", "shutup_commands", default=[]))

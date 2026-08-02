@@ -59,6 +59,13 @@ def test_chitchat_passthrough():
     assert agent.handle("ты любишь кальян?") == "Я не люблю кальян."
 
 
+def test_lore_in_system_prompt():
+    agent = Agent([], FakeBrain(content=""), lore="Ты пират.")
+    assert "Ты пират." in agent.system
+    agent = Agent([], FakeBrain(content=""), lore="")
+    assert "характер" not in agent.system
+
+
 def test_empty_content():
     agent = make_agent(FakeBrain(content=""))
     assert agent.handle("абракадабра зюзюка") == "Не понял команду"

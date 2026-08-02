@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from src.config import ASSISTANT_LORE
 from src.services.ollama import OllamaBrain
 from src.skills.base import Skill
 
@@ -20,8 +21,9 @@ SYSTEM_PROMPT = (
 
 
 class Agent:
-    def __init__(self, skills: list[Skill], brain: OllamaBrain):
+    def __init__(self, skills: list[Skill], brain: OllamaBrain, lore: str = ASSISTANT_LORE):
         self.brain = brain
+        self.system = SYSTEM_PROMPT + (f" Твой характер и предыстория: {lore}" if lore else "")
         # Порядок навыков = приоритет правил роутера.
         self.router = [
             (re.compile(rule.pattern, re.IGNORECASE), rule.handler)
@@ -45,7 +47,7 @@ class Agent:
         return self._handle_with_llm(text)
 
     def _handle_with_llm(self, text: str) -> str:
-        tool_calls, content = self.brain.decide(SYSTEM_PROMPT, text, self._schemas)
+        tool_calls, content = self.brain.decide(self.system, text, self._schemas)
         if not tool_calls:
             fallback = self._degenerate_fallback(content, text)
             if fallback is not None:

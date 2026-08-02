@@ -67,6 +67,7 @@ python main.py --meter             # уровень микрофона прот�
 | `OLLAMA_MODEL` | `qwen3:1.7b` | побольше: `qwen3:4b`; на Pi: `qwen3:0.6b` |
 | `OLLAMA_KEEP_ALIVE` | `30m` | сколько держать модель в памяти |
 | `ASSISTANT_NAMES` | `игорь` | имена через запятую: `игорь,гарик,ассистент` |
+| `ASSISTANT_LORE` | пусто | характер/лор для болтовни («ты дерзкий, но добрый…») |
 | `WHISPER_MODEL` | `large-v3-turbo` | на слабой машине: `small` (хуже имена артистов) |
 | `WHISPER_DEVICE` | `auto` | `cuda` / `cpu` (auto пробует cuda, падает на cpu) |
 | `MIC_DEVICE` | системный | индекс или часть имени из `main.py --devices` |

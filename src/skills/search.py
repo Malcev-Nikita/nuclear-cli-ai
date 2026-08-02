@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import requests
 
+from src.config import ASSISTANT_LORE
 from src.services.ollama import OllamaBrain
 from src.services.websearch import DuckDuckGo
 from src.skills.base import Rule, Skill, Tool
@@ -31,7 +32,8 @@ class SearchSkill(Skill):
                 {"role": "system", "content":
                     "Ответь на вопрос пользователя по результатам поиска: кратко, "
                     "1-3 предложения, по-русски, без ссылок и лишних слов — ответ "
-                    "будет озвучен голосом. Отвечай сразу, без рассуждений."},
+                    "будет озвучен голосом. Отвечай сразу, без рассуждений."
+                    + (f" Твой характер: {ASSISTANT_LORE}" if ASSISTANT_LORE else "")},
                 # /no_think — софт-переключатель qwen3, глушит рассуждения
                 {"role": "user",
                  "content": f"Вопрос: {query}\n\nРезультаты поиска:\n{context} /no_think"},

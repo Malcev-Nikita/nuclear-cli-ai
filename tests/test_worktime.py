@@ -40,6 +40,23 @@ def test_parse_period_ranges():
     assert parse_period("за год", TODAY) == (date(2026, 1, 1), TODAY, "за год")
 
 
+def test_parse_period_named_months():
+    assert parse_period("за июль", TODAY) == (date(2026, 7, 1), date(2026, 7, 31), "за июль")
+    assert parse_period("в мае", TODAY) == (date(2026, 5, 1), date(2026, 5, 31), "за май")
+    assert parse_period("за июнь 2025 года", TODAY) == \
+        (date(2025, 6, 1), date(2025, 6, 30), "за июнь 2025 года")
+    assert parse_period("за декабрь", TODAY) == (date(2026, 12, 1), date(2026, 12, 31), "за декабрь")
+
+
+def test_parse_period_previous():
+    assert parse_period("в прошлом месяце", TODAY) == \
+        (date(2026, 7, 1), date(2026, 7, 31), "за прошлый месяц")
+    assert parse_period("за прошлую неделю", TODAY) == \
+        (date(2026, 7, 20), date(2026, 7, 26), "за прошлую неделю")
+    assert parse_period("за прошлый год", TODAY) == \
+        (date(2025, 1, 1), date(2025, 12, 31), "за прошлый год")
+
+
 def test_parse_period_dates():
     assert parse_period("за 26 июня", TODAY) == (date(2026, 6, 26), date(2026, 6, 26), "за 26 июня")
     assert parse_period("26-го июня", TODAY)[0] == date(2026, 6, 26)

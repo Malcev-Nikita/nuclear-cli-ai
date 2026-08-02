@@ -18,6 +18,23 @@ _DATE_RE = re.compile(
     r"(январ|феврал|март|апрел|ма[яй]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*"
     r"(?:\s+(\d{4})(?:\s*год\w*)?)?"
 )
+# месяц по имени без числа: «за июль», «в мае», «за июнь 2025»
+_MONTH_RE = re.compile(
+    r"(?<![а-яё])(январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*"
+    r"(?:\s+(\d{4})(?:\s*год\w*)?)?"
+)
+_MONTH_NAMES = ["январь", "февраль", "март", "апрель", "май", "июнь",
+                "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+
+
+def _month_num(word: str) -> int:
+    return next(n for prefix, n in _MONTHS.items() if word.startswith(prefix))
+
+
+def _month_range(year: int, month: int) -> tuple[date, date]:
+    frm = date(year, month, 1)
+    nxt = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    return frm, nxt - timedelta(days=1)
 
 
 def spoken_work(seconds: int) -> str:
@@ -49,13 +66,28 @@ def parse_period(text: str, today: date | None = None):
         except ValueError:
             return None
         return d, d, "за " + re.sub(r"\s+", " ", match.group(0)).strip()
+    match = _MONTH_RE.search(t)  # месяц по имени: «за июль [2025]»
+    if match:
+        month = _month_num(match.group(1))
+        year = int(match.group(2)) if match.group(2) else today.year
+        frm, to = _month_range(year, month)
+        label = f"за {_MONTH_NAMES[month - 1]}" + (f" {year} года" if match.group(2) else "")
+        return frm, to, label
     if "недел" in t:
-        return today - timedelta(days=today.weekday()), today, "за неделю"
+        monday = today - timedelta(days=today.weekday())
+        if "прошл" in t:
+            return monday - timedelta(days=7), monday - timedelta(days=1), "за прошлую неделю"
+        return monday, today, "за неделю"
     if "месяц" in t:
+        if "прошл" in t:
+            prev_last = today.replace(day=1) - timedelta(days=1)
+            return prev_last.replace(day=1), prev_last, "за прошлый месяц"
         return today.replace(day=1), today, "за месяц"
     if "сегодня" in t:  # раньше «год»: в «сегодня» есть подстрока «год»
         return today, today, "сегодня"
     if "год" in t:
+        if "прошл" in t:
+            return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31), "за прошлый год"
         return date(today.year, 1, 1), today, "за год"
     return today, today, "сегодня"  # период не назван — значит, за сегодня
 

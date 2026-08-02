@@ -30,7 +30,7 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 
 - `main.py` — точка входа и СБОРКА (сервисы → навыки → агент; порядок навыков =
   приоритет правил роутера: playback, favorites, youtube, music, weather,
-  clock, notes, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`,
+  clock, [worktime], notes, search — менять осторожно). Режимы: голос (деф.), `--text`, `--devices`,
   `--meter` (живой уровень RMS vs порог VAD — тюнинг vad_gain/vad_abs_min).
 - `src/core/` — ядро: `wake.py` (WakeMatcher: имя/bare/shutup/контекст,
   looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
@@ -39,12 +39,20 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
   (plural/fmt_track/fmt_time/spoken_duration).
 - `src/services/` — адаптеры, каждый со своими граблями: `nuclear.py`
   (McpClient + NuclearPlayer, БЕЗ фраз), `ollama.py` (OllamaBrain,
-  strip_think/parse_text_tool_call), `weather.py`, `websearch.py`, `youtube.py`.
+  strip_think/parse_text_tool_call), `weather.py`, `websearch.py`, `youtube.py`,
+  `bitrix.py` (Bitrix24: учёт времени; вебхук — СЕКРЕТ, из config.local.toml,
+  URL не печатать и не отдавать в ошибки — BitrixError глушит requests-тексты;
+  пагинация старых task.* — PARAMS[NAV_PARAMS][iNumPage], снято с
+  projects/b24.time_managment/src/lib/b24.js).
 - `src/skills/` — навыки (Skill: rules() + tools(), см. base.py; Tool.query_arg
   нужен агенту для починки вырожденных ответов): playback, favorites, music
   (транслит плейлистов, ютуб-фолбэк), youtube, weather, clock, notes
   (файлы в NOTES_DIR, деф. public/notepad/, в .gitignore; имя файла =
-  дата-время с мкс + слаг -> сортировка по имени хронологична), search.
+  дата-время с мкс + слаг -> сортировка по имени хронологична), search;
+  worktime (опциональный, только при B24_WEBHOOK; parse_period: вчера/позавчера/
+  неделя/месяц/год/«26 июня [2025]», год по умолчанию текущий; проверка
+  «сегодня» ДО «год» — в «сегодня» есть подстрока «год»; упоминание work_time
+  в системный промпт Agent добавляет сам, если инструмент есть).
 - `src/audio/` — mic.py (MicSegmenter, анти-лаг), stt.py (Transcriber, CUDA),
   tts.py (Speaker, умный barge-in).
 - `assistant.py`/`voice.py` удалены (были шимами; запуск только через main.py).

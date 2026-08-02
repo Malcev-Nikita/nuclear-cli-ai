@@ -17,6 +17,7 @@ import requests
 from src import config
 from src.core.agent import Agent
 from src.core.wake import WakeMatcher, looks_like_junk, normalize_words
+from src.services.bitrix import Bitrix24
 from src.services.nuclear import McpClient, NuclearError, NuclearPlayer
 from src.services.ollama import OllamaBrain
 from src.services.weather import OpenMeteoWeather
@@ -29,6 +30,7 @@ from src.skills.notes import NotesSkill
 from src.skills.playback import PlaybackSkill
 from src.skills.search import SearchSkill
 from src.skills.weather import WeatherSkill
+from src.skills.worktime import WorktimeSkill
 from src.skills.youtube import YoutubeSkill
 
 
@@ -45,9 +47,10 @@ def build() -> tuple[McpClient, OllamaBrain, Agent]:
         MusicSkill(player, youtube),
         WeatherSkill(OpenMeteoWeather(config.WEATHER_CITY)),
         ClockSkill(),
-        NotesSkill(),
-        SearchSkill(DuckDuckGo(), brain),
     ]
+    if config.B24_WEBHOOK:
+        skills.append(WorktimeSkill(Bitrix24()))
+    skills += [NotesSkill(), SearchSkill(DuckDuckGo(), brain)]
     return mcp, brain, Agent(skills, brain)
 
 

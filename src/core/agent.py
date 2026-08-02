@@ -23,7 +23,6 @@ SYSTEM_PROMPT = (
 class Agent:
     def __init__(self, skills: list[Skill], brain: OllamaBrain, lore: str = ASSISTANT_LORE):
         self.brain = brain
-        self.system = SYSTEM_PROMPT + (f" Твой характер и предыстория: {lore}" if lore else "")
         # Порядок навыков = приоритет правил роутера.
         self.router = [
             (re.compile(rule.pattern, re.IGNORECASE), rule.handler)
@@ -35,6 +34,11 @@ class Agent:
         # Для починки вырожденных ответов qwen3:1.7b:
         self._query_arg = {t.name: t.query_arg for t in all_tools if t.query_arg}
         self._no_arg = {t.name for t in all_tools if not t.params}
+        self.system = SYSTEM_PROMPT
+        if "work_time" in self.tool_impl:  # навык опциональный (нужен вебхук B24)
+            self.system += " На вопрос «сколько я проработал/отработал» вызови work_time."
+        if lore:
+            self.system += f" Твой характер и предыстория: {lore}"
 
     def handle(self, text: str) -> str:
         text = text.strip()

@@ -57,6 +57,12 @@ class FakeWeather:
     def get(self, city=""):
         return f"Сейчас в {city or 'городе'} плюс 20, ясно"
 
+    def forecast(self, city="", when="завтра"):
+        return f"{when.capitalize()} в {city or 'городе'} дождь"
+
+    def will_precipitate(self, city="", when="завтра", kind="дождь"):
+        return f"{when.capitalize()} обещают {kind}"
+
 
 class FakeWeb:
     def __init__(self, results=None):

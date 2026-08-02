@@ -58,6 +58,10 @@ class PlaybackSkill(Skill):
         self.player.set_shuffle(enabled)
         return "Перемешиваю" if enabled else "Играю по порядку"
 
+    def set_repeat(self, mode: str) -> str:
+        self.player.set_repeat(mode)
+        return {"one": "Повторяю трек", "all": "Повторяю очередь"}.get(mode, "Повтор выключен")
+
     def seek_by(self, delta_seconds: int) -> str:
         state = self.player.state()
         if not state.get("duration") and state.get("status") not in ("playing", "paused"):
@@ -110,8 +114,16 @@ class PlaybackSkill(Skill):
             Rule(r"^(тише|потише)$", lambda m: self.change_volume(-10)),
             Rule(r"^(?:громкость|звук)\s+(\d{1,3})", lambda m: self.set_volume(int(m.group(1)))),
             Rule(r"^(что играет|что сейчас играет|now playing)\??$", lambda m: self.now_playing()),
-            Rule(r"^(перемешай|шафл|shuffle)$", lambda m: self.set_shuffle(True)),
-            Rule(r"^(по порядку|без шафла)$", lambda m: self.set_shuffle(False)),
+            Rule(r"^(?:включи\s+)?(перемешай|перемешивание|вперемешку|шафл|shuffle)$",
+                 lambda m: self.set_shuffle(True)),
+            Rule(r"^(?:играй\s+)?(по порядку|без шафла|выключи перемешивание)$",
+                 lambda m: self.set_shuffle(False)),
+            # повтор: «этот трек» -> one, иначе вся очередь
+            Rule(r"^(?:включи\s+|поставь\s+(?:на\s+)?)?повтор(?:\s+(трека|очереди))?$",
+                 lambda m: self.set_repeat("one" if m.group(1) == "трека" else "all")),
+            Rule(r"^(?:повтори|зацикли|поставь на повтор)\s+(?:этот\s+)?(?:трек|песню)$",
+                 lambda m: self.set_repeat("one")),
+            Rule(r"^(?:выключи|отключи)\s+повтор$", lambda m: self.set_repeat("off")),
         ]
 
     def tools(self) -> list[Tool]:
@@ -125,6 +137,15 @@ class PlaybackSkill(Skill):
                  lambda a: self.set_volume(int(a["level"])),
                  params={"level": {"type": "integer", "description": "0-100"}},
                  required=["level"]),
+            Tool("set_repeat", "Включить или выключить повтор",
+                 lambda a: self.set_repeat(str(a.get("mode", "all"))),
+                 params={"mode": {"type": "string",
+                                  "description": "one — повтор трека, all — очереди, off — выключить"}},
+                 required=["mode"]),
+            Tool("set_shuffle", "Включить или выключить перемешивание очереди",
+                 lambda a: self.set_shuffle(bool(a.get("enabled", True))),
+                 params={"enabled": {"type": "boolean", "description": "true — перемешивать"}},
+                 required=["enabled"]),
             Tool("seek_by", "Перемотать текущий трек на N секунд (отрицательное N — назад)",
                  lambda a: self.seek_by(int(a["seconds"])),
                  params={"seconds": {"type": "integer", "description": "Например 30 или -30"}},

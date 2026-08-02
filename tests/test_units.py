@@ -18,6 +18,10 @@ def test_spoken_duration():
     assert spoken_duration(30) == "30 секунд"
     assert spoken_duration(60) == "минуту"
     assert spoken_duration(120) == "2 минуты"
+    assert spoken_duration(90) == "минуту 30 секунд"
+    assert spoken_duration(3600) == "час"
+    assert spoken_duration(5400) == "час 30 минут"
+    assert spoken_duration(7200) == "2 часа"
 
 
 def test_spoken_temp():

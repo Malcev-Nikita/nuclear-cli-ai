@@ -49,5 +49,12 @@ class Skill:
     def tools(self) -> list[Tool]:
         return []
 
+    def follow_up(self, text: str) -> str | None:
+        """Уточнение к своей же предыдущей команде: «а за позавчера?», «а в Москве?».
+
+        Приходит хвост после «а»/«и». None = не понял, агент пойдёт дальше в LLM.
+        """
+        return None
+
 
 QUERY_PARAM = {"type": "string", "description": "Название так, как сказал пользователь"}

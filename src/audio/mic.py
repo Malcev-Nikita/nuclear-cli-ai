@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import time
 
 from src.config import (
     BLOCK,
@@ -64,8 +65,12 @@ class MicSegmenter:
         except queue.Empty:
             return None
 
-    def utterances(self):
+    def utterances(self, idle_tick: float | None = None):
+        """Готовые фразы. С idle_tick в тишине отдаёт None раз в N секунд —
+        чтобы цикл успевал заглянуть в таймеры, не заводя отдельный поток
+        (вся речь остаётся в одном потоке, иначе ломается barge-in)."""
         np = self._np
+        last_tick = time.monotonic()
         pre_roll: list = []
         pre_roll_blocks = int(PRE_ROLL_SEC * SAMPLE_RATE / BLOCK)
         capture: list | None = None
@@ -100,6 +105,9 @@ class MicSegmenter:
                     pre_roll.append(block)
                     if len(pre_roll) > pre_roll_blocks:
                         pre_roll.pop(0)
+                    if idle_tick and time.monotonic() - last_tick >= idle_tick:
+                        last_tick = time.monotonic()
+                        yield None  # тишина — можно проверить таймеры
                 continue
 
             capture.append(block)
@@ -118,6 +126,7 @@ class MicSegmenter:
                 audio = np.concatenate(capture)
                 capture = None
                 pre_roll = []
+                last_tick = time.monotonic()
                 if len(audio) / SAMPLE_RATE >= MIN_UTTER_SEC + SILENCE_END_SEC:
                     yield audio
 

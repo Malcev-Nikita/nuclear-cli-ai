@@ -5,3 +5,4 @@ __pycache__/
 voices/
 config.local.toml
 public/notepad/
+public/reminders.json

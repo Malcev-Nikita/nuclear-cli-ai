@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from src.core.texts import plural
+from src.core.texts import spoken_clock
 from src.skills.base import Rule, Skill, Tool
 
 _MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля",
@@ -17,11 +17,9 @@ class ClockSkill(Skill):
     @staticmethod
     def get_time() -> str:
         now = datetime.now()
-        hours = f"{now.hour} {plural(now.hour, 'час', 'часа', 'часов')}"
         if now.minute == 0:
-            return f"Сейчас ровно {hours}"
-        minutes = f"{now.minute} {plural(now.minute, 'минута', 'минуты', 'минут')}"
-        return f"Сейчас {hours} {minutes}"
+            return f"Сейчас ровно {spoken_clock(now.hour)}"
+        return f"Сейчас {spoken_clock(now.hour, now.minute)}"
 
     @staticmethod
     def get_date() -> str:

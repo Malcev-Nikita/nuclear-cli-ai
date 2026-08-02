@@ -155,6 +155,10 @@ class NuclearPlayer:
         self.mcp.call("Queue.goToIndex", {"index": 0})
         self.mcp.call("Playback.play")
 
+    def add_to_queue(self, tracks: list) -> None:
+        """Дописать в конец очереди, не трогая то, что играет сейчас."""
+        self.mcp.call("Queue.addToQueue", {"tracks": tracks})
+
     def pause(self) -> None:
         self.mcp.call("Playback.pause")
 
@@ -182,6 +186,10 @@ class NuclearPlayer:
 
     def set_shuffle(self, enabled: bool) -> None:
         self.mcp.call("Playback.setShuffleEnabled", {"enabled": enabled})
+
+    def set_repeat(self, mode: str) -> None:
+        """RepeatMode из plugin-sdk: off (выкл) | all (очередь) | one (трек)."""
+        self.mcp.call("Playback.setRepeatMode", {"mode": mode})
 
     # -- избранное
 

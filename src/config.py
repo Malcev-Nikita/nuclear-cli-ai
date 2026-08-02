@@ -105,12 +105,16 @@ MAX_LAG_SEC = float(_get("microphone", "max_lag_sec", default=3.0))
 
 PIPER_VOICE = _get("tts", "voice", "PIPER_VOICE")
 TTS_SPEED = float(_get("tts", "speed", "TTS_SPEED", default=1.25))
+DUCK_VOLUME_PCT = int(_get("tts", "duck_volume", "DUCK_VOLUME_PCT", default=25))
 VOICES_DIR = os.path.join(_ROOT, "voices")
 
 # --- заметки ----------------------------------------------------------------
 
 _notes_dir = _get("notes", "dir", "NOTES_DIR", default="public/notepad")
 NOTES_DIR = _notes_dir if os.path.isabs(_notes_dir) else os.path.join(_ROOT, _notes_dir)
+
+_reminders = _get("reminders", "file", "REMINDERS_FILE", default="public/reminders.json")
+REMINDERS_FILE = _reminders if os.path.isabs(_reminders) else os.path.join(_ROOT, _reminders)
 
 # --- Битрикс24 (секрет — в config.local.toml; URL не печатать) --------------
 

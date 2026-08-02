@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from src.config import ASSISTANT_LORE
 from src.services.ollama import OllamaBrain
 from src.skills.base import Skill
+
+# Уточнение к прошлой команде: «а за позавчера?», «а в Москве?».
+_FOLLOW_UP = re.compile(r"^(?:а|и)\s+(?:что\s+|как\s+)?(.+?)\s*\??$", re.IGNORECASE)
+FOLLOW_UP_MEMORY_SEC = 180.0  # дольше — уже другой разговор
 
 SYSTEM_PROMPT = (
     "Ты — голосовой помощник музыкального плеера. На каждую команду пользователя "
@@ -16,6 +21,7 @@ SYSTEM_PROMPT = (
     "На вопрос о погоде вызови get_weather, о времени — get_time, о дате — "
     "get_date. На вопрос о фактах, людях, событиях или новостях вызови "
     "web_search. На «запиши…»/«запомни…» вызови save_note с текстом дословно. "
+    "На «поставь таймер» — set_timer, «напомни …» — set_reminder, «разбуди …» — set_alarm. "
     "Если это просто болтовня — ответь одной короткой фразой без инструментов."
 )
 
@@ -25,9 +31,11 @@ class Agent:
         self.brain = brain
         # Порядок навыков = приоритет правил роутера.
         self.router = [
-            (re.compile(rule.pattern, re.IGNORECASE), rule.handler)
+            (re.compile(rule.pattern, re.IGNORECASE), rule.handler, skill)
             for skill in skills for rule in skill.rules()
         ]
+        self._tool_owner = {t.name: skill for skill in skills for t in skill.tools()}
+        self._context: tuple[Skill, float] | None = None  # кто отвечал последним
         all_tools = [tool for skill in skills for tool in skill.tools()]
         self.tool_impl = {tool.name: tool.impl for tool in all_tools}
         self._schemas = [tool.schema() for tool in all_tools]
@@ -44,11 +52,35 @@ class Agent:
         text = text.strip()
         if not text:
             return ""
-        for pattern, handler in self.router:
+        for pattern, handler, skill in self.router:
             match = pattern.match(text)
             if match:
+                self._remember(skill)
                 return handler(match)
+        answer = self._follow_up(text)
+        if answer is not None:
+            return answer
         return self._handle_with_llm(text)
+
+    def _remember(self, skill: Skill | None) -> None:
+        if skill is not None:
+            self._context = (skill, time.monotonic())
+
+    def _follow_up(self, text: str) -> str | None:
+        """«а за позавчера?» -> тот же навык, что отвечал только что."""
+        if not self._context:
+            return None
+        skill, when = self._context
+        if time.monotonic() - when > FOLLOW_UP_MEMORY_SEC:
+            self._context = None
+            return None
+        match = _FOLLOW_UP.match(text)
+        if not match:
+            return None
+        answer = skill.follow_up(match.group(1))
+        if answer is not None:
+            self._remember(skill)
+        return answer
 
     def _handle_with_llm(self, text: str) -> str:
         tool_calls, content = self.brain.decide(self.system, text, self._schemas)
@@ -72,6 +104,7 @@ class Agent:
             if not impl:
                 results.append(f"Неизвестный инструмент: {name}")
                 continue
+            self._remember(self._tool_owner.get(name))
             results.append(impl(arguments))
         return "; ".join(r for r in results if r)
 

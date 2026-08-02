@@ -47,8 +47,12 @@ def spoken_work(seconds: int) -> str:
     return " ".join(parts) or "меньше минуты"
 
 
-def parse_period(text: str, today: date | None = None):
-    """Текст -> (с, по, метка для ответа) или None. Год не сказан = текущий."""
+def parse_period(text: str, today: date | None = None, strict: bool = False):
+    """Текст -> (с, по, метка для ответа) или None. Год не сказан = текущий.
+
+    strict=True — не подставлять «сегодня» по умолчанию: нужно для уточнений
+    («а за позавчера»), где неузнанный текст должен уйти дальше в LLM.
+    """
     t = f" {text.lower().strip()} "
     today = today or date.today()
     if "позавчера" in t:
@@ -89,6 +93,8 @@ def parse_period(text: str, today: date | None = None):
         if "прошл" in t:
             return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31), "за прошлый год"
         return date(today.year, 1, 1), today, "за год"
+    if strict:
+        return None
     return today, today, "сегодня"  # период не назван — значит, за сегодня
 
 
@@ -138,6 +144,10 @@ class WorktimeSkill(Skill):
             Rule(r"^сколько\s+(?:часов\s+|времени\s+)?(?:я\s+)?\S*\s*(?:про|от)?работал\w*(?:\s+.+)?$",
                  lambda m: self.report(m.group(0))),
         ]
+
+    def follow_up(self, text: str) -> str | None:
+        """«а за позавчера?» после вопроса о работе — тот же отчёт, другой период."""
+        return self.report(text) if parse_period(text, strict=True) else None
 
     def tools(self) -> list[Tool]:
         return [

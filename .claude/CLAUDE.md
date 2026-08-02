@@ -28,7 +28,8 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
 
 ## Структура (пересобрано 2026-08-02, clean-arch-lite по выбору пользователя)
 
-- `main.py` — точка входа и СБОРКА (сервисы → навыки → агент; порядок навыков =
+- `main.py` — точка входа и СБОРКА (`build()` отдаёт mcp, player, brain, agent —
+  плеер нужен голосовому циклу для приглушения музыки; порядок навыков =
   приоритет правил роутера: playback, favorites, youtube, music, weather,
   clock, [worktime], notes, search — менять осторожно; в [скобках] —
   опциональные, включаются ключами в конфиге). Режимы: голос (деф.), `--text`, `--devices`,
@@ -37,7 +38,9 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
   looks_like_junk), `agent.py` (Agent: роутер → LLM, вырожденные фолбэки,
   SYSTEM_PROMPT + ASSISTANT_LORE — лор из config.toml `[assistant] lore`,
   влияет на болтовню и пересказ поиска; упоминания опциональных инструментов
-  добавляются, только если навык собран), `texts.py`
+  добавляются, только если навык собран; КОНТЕКСТ: агент помнит навык,
+  ответивший последним (3 минуты), и отдаёт ему уточнения вида «а за
+  позавчера?» через `Skill.follow_up`), `texts.py`
   (plural/fmt_track/fmt_time/spoken_duration).
 - `src/services/` — адаптеры, каждый со своими граблями: `nuclear.py`
   (McpClient + NuclearPlayer, БЕЗ фраз), `ollama.py` (OllamaBrain,
@@ -47,16 +50,31 @@ Nuclear/InnerTube/MCP — в CLAUDE.md того проекта; здесь то�
   пагинация старых task.* — PARAMS[NAV_PARAMS][iNumPage], снято с
   projects/b24.time_managment/src/lib/b24.js).
 - `src/skills/` — навыки (Skill: rules() + tools(), см. base.py; Tool.query_arg
-  нужен агенту для починки вырожденных ответов): playback, favorites, music
-  (транслит плейлистов, ютуб-фолбэк), youtube, weather, clock, notes
+  нужен агенту для починки вырожденных ответов; `follow_up()` — уточнения):
+  playback (+повтор `Playback.setRepeatMode` off/all/one и перемешивание),
+  favorites, music (транслит плейлистов, ютуб-фолбэк, «включи что-нибудь» =
+  избранное вперемешку, «добавь в очередь» = addToQueue без clearQueue),
+  youtube, weather (сейчас + прогноз), clock, reminders (таймеры/будильники/
+  напоминания: `parse_delay`/`split_clock`, хранение в public/reminders.json),
+  notes (+поиск по словам)
   (файлы в NOTES_DIR, деф. public/notepad/, в .gitignore; имя файла =
   дата-время с мкс + слаг -> сортировка по имени хронологична), search;
   worktime (опциональный, только при B24_WEBHOOK; parse_period: вчера/позавчера/
   неделя/месяц/год/«26 июня [2025]», год по умолчанию текущий; проверка
   «сегодня» ДО «год» — в «сегодня» есть подстрока «год»; упоминание work_time
   в системный промпт Agent добавляет сам, если инструмент есть).
-- `src/audio/` — mic.py (MicSegmenter, анти-лаг), stt.py (Transcriber, CUDA),
-  tts.py (Speaker, умный barge-in).
+- `src/audio/` — mic.py (MicSegmenter, анти-лаг; `utterances(idle_tick)` в тишине
+  отдаёт None — по нему цикл проверяет таймеры, БЕЗ отдельного потока: вся речь
+  обязана идти из главного потока, иначе barge-in читает микрофон вдвоём),
+  stt.py (Transcriber, CUDA),
+  tts.py (Speaker: ПОТОКОВЫЙ синтез — фоновый поток `_synthesize_into` кладёт
+  куски piper (он режет текст по предложениям) в очередь, играем каждый сразу;
+  `_BargeWatcher` держит состояние barge-in на всю реплику, а не на кусок —
+  иначе эталон эха мерился бы заново на каждом предложении),
+  duck.py (Ducker: на время речи музыка приглушается до DUCK_VOLUME_PCT и
+  возвращается в `finally` — как у Яндекс станции; тише эхо = надёжнее
+  barge-in. Не трогает громкость, если музыка не играет / уже тише порога, и
+  молча пропускает всё при недоступном Nuclear).
 - `assistant.py`/`voice.py` удалены (были шимами; запуск только через main.py).
 - Новая способность = класс в `src/skills/` + строка в сборке `main.py`.
 
@@ -238,6 +256,12 @@ BARE_COMMANDS-регулярка и т.д.), импорт — `from src.config i
 - **Погода** (`src/services/weather.py` + `src/skills/weather.py`): Open-Meteo (быстрее и стабильнее
   wttr.in, ~0.3 с, без ключа): геокодер open-meteo (кеш на сессию, падежи
   «в казани» лечатся перебором окончаний) → forecast API, коды WMO → `_WMO_DESC`.
+  Геокодер выбирает САМЫЙ НАСЕЛЁННЫЙ из кандидатов (иначе «казани» → «казана» →
+  село Казанак, вживую 2026-08-02); разговорные имена — `_CITY_ALIASES`
+  («питере» иначе находит деревню Питер). Прогноз: `forecast`/`will_precipitate`
+  по daily-API, `parse_when` понимает завтра/послезавтра/выходные/день недели
+  («в среду» в среду = через неделю); в правилах роутера день недели описан
+  явным списком — шаблон `в \w+` съедал бы «погода в москве».
   Город из команды → `WEATHER_CITY` → по IP (ip-api.com). Фраза «под озвучку»:
   температура словами («плюс 18»). Яндекс.Погоду не взяли: API по ключу, платно.
 - **Поиск** (`web_search` + `Agent.answer_from_web`): DuckDuckGo HTML-эндпоинт

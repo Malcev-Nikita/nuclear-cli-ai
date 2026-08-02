@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import time
+from typing import NamedTuple
 
 import requests
 
@@ -20,6 +21,7 @@ from src.core.wake import WakeMatcher, looks_like_junk, normalize_words
 from src.services.bitrix import Bitrix24
 from src.services.nuclear import McpClient, NuclearError, NuclearPlayer
 from src.services.ollama import OllamaBrain
+from src.services.reminders import Reminders
 from src.services.weather import OpenMeteoWeather
 from src.services.websearch import DuckDuckGo
 from src.services.youtube import YoutubeSearch
@@ -28,17 +30,31 @@ from src.skills.favorites import FavoritesSkill
 from src.skills.music import MusicSkill
 from src.skills.notes import NotesSkill
 from src.skills.playback import PlaybackSkill
+from src.skills.reminders import RemindersSkill, announce
 from src.skills.search import SearchSkill
 from src.skills.weather import WeatherSkill
 from src.skills.worktime import WorktimeSkill
 from src.skills.youtube import YoutubeSkill
 
 
-def build() -> tuple[McpClient, OllamaBrain, Agent]:
+REMINDER_TICK_SEC = 0.5  # как часто в тишине заглядывать в таймеры
+
+
+class Parts(NamedTuple):
+    """Собранный ассистент: агенту нужны все, циклу — плеер и напоминания."""
+    mcp: McpClient
+    player: NuclearPlayer
+    brain: OllamaBrain
+    agent: Agent
+    reminders: Reminders
+
+
+def build() -> Parts:
     """Сборка: сервисы -> навыки -> агент. Порядок навыков = приоритет роутера."""
     mcp = McpClient(config.NUCLEAR_MCP_URL)
     player = NuclearPlayer(mcp)
     brain = OllamaBrain()
+    reminders = Reminders(config.REMINDERS_FILE)
     youtube = YoutubeSkill(player, YoutubeSearch())
     skills = [
         PlaybackSkill(player),
@@ -47,11 +63,12 @@ def build() -> tuple[McpClient, OllamaBrain, Agent]:
         MusicSkill(player, youtube),
         WeatherSkill(OpenMeteoWeather(config.WEATHER_CITY)),
         ClockSkill(),
+        RemindersSkill(reminders),
     ]
     if config.B24_WEBHOOK:
         skills.append(WorktimeSkill(Bitrix24()))
     skills += [NotesSkill(), SearchSkill(DuckDuckGo(), brain)]
-    return mcp, brain, Agent(skills, brain)
+    return Parts(mcp, player, brain, Agent(skills, brain), reminders)
 
 
 def check_connections(mcp: McpClient, brain: OllamaBrain) -> None:
@@ -83,14 +100,18 @@ def _dispatch(agent: Agent, command: str) -> str:
 
 
 def run_text() -> None:
-    mcp, brain, agent = build()
+    parts = build()
+    agent = parts.agent
     print("Nuclear CLI AI — текстовый режим")
-    check_connections(mcp, brain)
-    brain.warmup_async()
+    check_connections(parts.mcp, parts.brain)
+    parts.brain.warmup_async()
     print("Примеры: «включи нирвану», «плейлист rock», «дальше», «какая погода»,")
     print("         «найди столицу австралии», «что играет». Выход: q\n")
 
     while True:
+        # без микрофона тикать нечему — сработавшее показываем перед вводом
+        for item in parts.reminders.due():
+            print(f"⏰ {announce(item)}")
         try:
             text = input("🎤 > ")
         except (EOFError, KeyboardInterrupt):
@@ -105,16 +126,19 @@ def run_text() -> None:
 
 
 def run_voice() -> None:
+    from src.audio.duck import Ducker
     from src.audio.mic import MicSegmenter, mic_name, resolve_mic
     from src.audio.stt import Transcriber
     from src.audio.tts import Speaker, beep
 
-    mcp, brain, agent = build()
+    parts = build()
+    agent = parts.agent
     wake = WakeMatcher()
+    ducker = Ducker(parts.player, config.DUCK_VOLUME_PCT)
 
     print("Nuclear CLI AI — голосовой режим")
-    check_connections(mcp, brain)
-    brain.warmup_async()  # Ollama грузится параллельно с whisper
+    check_connections(parts.mcp, parts.brain)
+    parts.brain.warmup_async()  # Ollama грузится параллельно с whisper
 
     print(f"… загружаю whisper «{config.WHISPER_MODEL}»", flush=True)
     started = time.monotonic()
@@ -139,7 +163,8 @@ def run_voice() -> None:
     with MicSegmenter(mic_device) as mic:
 
         def speak(phrase: str) -> None:
-            heard = speaker.say(phrase, mic, stt)
+            with ducker.quiet():  # музыка тише, пока говорим
+                heard = speaker.say(phrase, mic, stt)
             if heard:  # перебили с именем — это команда
                 print(f"🎤 (перебил) «{heard}»")
                 process(heard)
@@ -182,7 +207,20 @@ def run_voice() -> None:
                 if speaker:
                     speak(answer)
 
-        for audio in mic.utterances():
+        def ring() -> None:
+            """Сработавшие таймеры/будильники — озвучиваем в главном потоке."""
+            for item in parts.reminders.due():
+                phrase = announce(item)
+                print(f"⏰ {phrase}")
+                beep()
+                if speaker:
+                    speak(phrase)
+
+        # idle_tick: в тишине генератор отдаёт None — момент проверить таймеры
+        for audio in mic.utterances(idle_tick=REMINDER_TICK_SEC):
+            ring()
+            if audio is None:
+                continue
             started = time.monotonic()
             text = stt.transcribe(audio)
             stt_ms = (time.monotonic() - started) * 1000

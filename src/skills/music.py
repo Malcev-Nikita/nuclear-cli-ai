@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 
 import requests
@@ -105,8 +106,40 @@ class MusicSkill(Skill):
         self.player.replace_queue_and_play(tracks)
         return f"Включаю плейлист «{playlist.get('title', name)}»: {len(tracks)} треков"
 
+    def queue_track(self, query: str) -> str:
+        """Дописать трек в конец очереди, не прерывая текущий."""
+        tracks = self.player.search(query, "tracks", 1)
+        if not tracks:
+            return f"Не нашёл «{query}»"
+        self.player.add_to_queue(tracks[:1])
+        return f"Добавил в очередь: {fmt_track(tracks[0])}"
+
+    def play_something(self) -> str:
+        """«Включи что-нибудь»: избранное вперемешку, иначе случайный плейлист."""
+        tracks = list(self.player.favorite_tracks())
+        source = "избранное"
+        if not tracks:
+            playlists = self.player.playlists_index()
+            if not playlists:
+                return "Нечего включить: ни избранного, ни плейлистов"
+            chosen = random.choice(playlists)
+            tracks = list(self.player.playlist_tracks(chosen["id"]))
+            source = f"плейлист «{chosen.get('name', '')}»"
+            if not tracks:
+                return f"В плейлисте «{chosen.get('name', '')}» пусто"
+        random.shuffle(tracks)
+        self.player.replace_queue_and_play(tracks)
+        return f"Включаю {source} вперемешку: {len(tracks)} треков"
+
     def rules(self) -> list[Rule]:
         return [
+            Rule(r"^(?:включ\w+|поставь|запусти|давай)\s+(?:что-нибудь|что нибудь|"
+                 r"чё-нибудь|любую музыку|музыку наугад|на свой вкус)$",
+                 lambda m: self.play_something()),
+            Rule(r"^(?:добавь|поставь|закинь)\s+в\s+очередь\s+(.+)$",
+                 lambda m: self.queue_track(m.group(1))),
+            Rule(r"^(?:добавь|закинь)\s+(.+?)\s+в\s+очередь$",
+                 lambda m: self.queue_track(m.group(1))),
             # «все песни из Х» (саундтрек, не исполнитель) — пусть решает LLM
             Rule(r"^(?:(?:включ\w+|поставь|запусти)\s+)?все (?:песни|треки) (?!из\s)(.+)$",
                  lambda m: self.play_artist(m.group(1))),
@@ -134,4 +167,9 @@ class MusicSkill(Skill):
             Tool("play_playlist", "Включить плейлист по названию",
                  lambda a: self.play_playlist(a["name"]),
                  params={"name": QUERY_PARAM}, required=["name"], query_arg="name"),
+            Tool("play_something", "Включить что-нибудь на своё усмотрение (избранное вперемешку)",
+                 lambda a: self.play_something()),
+            Tool("add_to_queue", "Добавить песню в конец очереди, не прерывая текущую",
+                 lambda a: self.queue_track(a["query"]),
+                 params={"query": QUERY_PARAM}, required=["query"], query_arg="query"),
         ]

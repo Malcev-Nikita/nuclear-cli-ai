@@ -51,6 +51,37 @@ def test_save_via_llm_tool(tmp_path):
         == "Записал: полить цветы"
 
 
+def test_search_finds_by_word(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.handle("запиши продлить хостинг в июле")
+    agent.handle("запиши позвонить маме")
+    answer = agent.handle("что я записывал про хостинг")
+    assert "продлить хостинг" in answer and "позвонить маме" not in answer
+    assert answer.startswith("Нашёл 1 заметку")
+
+
+def test_search_all_words_must_match(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.handle("запиши купить хлеб")
+    assert "ничего не записано" in agent.handle("найди в заметках купить молоко")
+
+
+def test_search_ignores_case_and_yo(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.handle("запиши отвезти ёлку")
+    assert "отвезти" in agent.handle("что я записывал про Елку")
+
+
+def test_search_via_llm_tool(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.handle("запиши оплатить домен")
+    brain = FakeBrain(tool_calls=[
+        {"function": {"name": "search_notes", "arguments": {"query": "домен"}}}
+    ])
+    agent2 = make_agent(tmp_path, brain)
+    assert "оплатить домен" in agent2.handle("напомни, что там было про домен")
+
+
 def test_slug_strips_bad_chars(tmp_path):
     make_agent(tmp_path).handle('запиши цена: 10*2 "штук"')
     name = os.listdir(tmp_path)[0]
